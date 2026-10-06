@@ -1,0 +1,1931 @@
+openapi: 3.0.3
+
+info:
+  title: Punto Plus API
+  version: 1.0.0
+  description: |
+    API REST de **fidelidad digital para pequeñas empresas**: tarjetas de sellos,
+    recompensas, promociones y canjes.
+
+    **Autenticación OAuth2 (Laravel Passport 13)** con los scopes `cliente`, `negocio` y `admin`:
+
+    - `Authorization Code + PKCE` para la app móvil de clientes (`/oauth/authorize` + `/oauth/token`).
+    - `Password grant` para apps propias de confianza (`POST /api/auth/login`, `POST /api/auth/register`).
+    - `Refresh token` para renovar el acceso (`POST /api/auth/refresh`).
+
+    Las respuestas de recurso se envuelven en `data` (+ `meta` y `links` al paginar). Los errores
+    incluyen `message` y un código estable en `error` (`invalid_credentials`, `missing_scope`, ...).
+  contact:
+    name: Punto Plus
+    email: hola@puntoplus.test
+  license:
+    name: MIT
+    url: https://opensource.org/licenses/MIT
+
+servers:
+  - url: http://localhost:8000
+    description: Desarrollo local
+  - url: https://api.puntoplus.test
+    description: Producción (ejemplo)
+
+tags:
+  - name: OAuth2
+    description: Endpoints del servidor OAuth2 de Passport
+  - name: Autenticación
+    description: Registro, login, refresh y cierre de sesión
+  - name: Perfil
+    description: Usuario autenticado
+  - name: Cliente
+    description: Área del cliente (scope `cliente`)
+  - name: Negocio
+    description: Área del negocio (scope `negocio`, middleware `role:negocio,admin`)
+  - name: Público
+    description: Endpoints sin autenticación
+
+paths:
+  /:
+    get:
+      tags: [Público]
+      summary: Índice de la API
+      responses:
+        '200':
+          description: Nombre, versión, enlaces a docs, health y OAuth2
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name: { type: string, example: Punto Plus }
+                  api: { type: string, example: Punto Plus API }
+                  version: { type: string, example: 1.0.0 }
+                  docs: { type: string, format: uri }
+                  health: { type: string, format: uri }
+
+  /up:
+    get:
+      tags: [Público]
+      summary: Health check
+      responses:
+        '200': { description: La aplicación responde }
+
+  /oauth/token:
+    post:
+      tags: [OAuth2]
+      summary: Endpoint OAuth2 de tokens
+      description: |
+        Acepta `grant_type=password`, `refresh_token`, `authorization_code` (PKCE) y
+        `client_credentials`. Requiere `client_id` y, si el cliente es confidencial,
+        `client_secret`.
+      requestBody:
+        required: true
+        content:
+          application/x-www-form-urlencoded:
+            schema:
+              type: object
+              required: [grant_type, client_id]
+              properties:
+                grant_type:
+                  type: string
+                  enum: [password, refresh_token, authorization_code, client_credentials]
+                client_id: { type: string, format: uuid }
+                client_secret: { type: string }
+                username: { type: string, format: email, description: Sólo password grant }
+                password: { type: string, description: Sólo password grant }
+                refresh_token: { type: string, description: Sólo refresh_token grant }
+                code: { type: string, description: Sólo authorization_code grant }
+                code_verifier: { type: string, description: PKCE }
+                redirect_uri: { type: string, description: Sólo authorization_code grant }
+                scope: { type: string, example: cliente }
+      responses:
+        '200':
+          description: Token emitido
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TokenResponse' }
+        '400':
+          description: Petición OAuth2 inválida (`invalid_grant`, `invalid_client`, ...)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OAuthError' }
+        '401':
+          description: Credenciales del cliente o del usuario inválidas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OAuthError' }
+
+  /oauth/authorize:
+    get:
+      tags: [OAuth2]
+      summary: Pantalla de consentimiento (Authorization Code + PKCE)
+      description: |
+        Requiere sesión de navegador (guard `web`); si no la hay, redirige a `/login`.
+        El usuario aprueba los scopes en la vista personalizada
+        (`Passport::authorizationView('auth.oauth.authorize')`) y la app recibe el `code`.
+      parameters:
+        - { name: client_id, in: query, required: true, schema: { type: string, format: uuid } }
+        - { name: redirect_uri, in: query, required: true, schema: { type: string } }
+        - { name: response_type, in: query, required: true, schema: { type: string, enum: [code] } }
+        - { name: scope, in: query, schema: { type: string, example: cliente } }
+        - { name: state, in: query, schema: { type: string } }
+        - { name: code_challenge, in: query, schema: { type: string } }
+        - { name: code_challenge_method, in: query, schema: { type: string, enum: [S256, plain] } }
+      responses:
+        '200':
+          description: Vista HTML de consentimiento
+          content:
+            text/html:
+              schema: { type: string }
+        '302':
+          description: Redirección a `/login` o a la `redirect_uri` con el código
+
+  /api/auth/register:
+    post:
+      tags: [Autenticación]
+      summary: Registro de cliente o negocio
+      description: |
+        Crea el usuario (`role`: `cliente` o `negocio`; `admin` nunca es autoasignable).
+        Si el rol es `negocio` hay que enviar el bloque `business`. Devuelve tokens OAuth2.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password, password_confirmation, role]
+              properties:
+                name: { type: string, maxLength: 150, example: Lucía Gómez }
+                email: { type: string, format: email, example: lucia@example.com }
+                phone: { type: string, nullable: true, example: '+34600111222' }
+                password: { type: string, format: password, minLength: 8 }
+                password_confirmation: { type: string, format: password }
+                role: { type: string, enum: [cliente, negocio] }
+                device_name: { type: string, nullable: true, example: 'iPhone 15' }
+                scopes:
+                  type: array
+                  nullable: true
+                  items: { type: string, enum: [cliente, negocio, admin] }
+                business:
+                  type: object
+                  description: Obligatorio si `role` es `negocio`
+                  properties:
+                    name: { type: string, example: Café Aurora }
+                    description: { type: string, nullable: true }
+                    category: { type: string, nullable: true, example: cafetería }
+                    phone: { type: string, nullable: true }
+                    email: { type: string, format: email, nullable: true }
+                    website: { type: string, nullable: true }
+                    address: { type: string, nullable: true }
+                    city: { type: string, nullable: true, example: Valencia }
+                    country: { type: string, nullable: true, minLength: 2, maxLength: 2, example: ES }
+                    latitude: { type: number, format: float, nullable: true }
+                    longitude: { type: number, format: float, nullable: true }
+      responses:
+        '201': { $ref: '#/components/responses/AuthSuccess' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/OAuthNotConfigured' }
+
+  /api/auth/login:
+    post:
+      tags: [Autenticación]
+      summary: Inicio de sesión (password grant)
+      description: |
+        Emite un `access_token` + `refresh_token` a través del password grant de Passport.
+        Si el cliente password grant no está configurado, la API emite un token personal
+        (sin refresh token) y lo registra en el log.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string, format: password }
+                device_name: { type: string, nullable: true }
+                scopes:
+                  type: array
+                  nullable: true
+                  items: { type: string, enum: [cliente, negocio, admin] }
+      responses:
+        '200': { $ref: '#/components/responses/AuthSuccess' }
+        '401':
+          description: Credenciales incorrectas
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { message: 'Las credenciales no son correctas.', error: invalid_credentials }
+        '403':
+          description: Cuenta desactivada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { message: 'Tu cuenta está desactivada. Contacta con soporte.', error: account_disabled }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+        '503': { $ref: '#/components/responses/OAuthNotConfigured' }
+
+  /api/auth/refresh:
+    post:
+      tags: [Autenticación]
+      summary: Renovar el access token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+                scope: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Token renovado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: Token renovado. }
+                  authorization: { $ref: '#/components/schemas/TokenResponse' }
+        '401':
+          description: Refresh token inválido o caducado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example: { message: 'El refresh token no es válido o ha caducado. Vuelve a iniciar sesión.', error: invalid_refresh_token }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/auth/logout:
+    post:
+      tags: [Autenticación]
+      summary: Cerrar la sesión actual
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      responses:
+        '200':
+          description: Token revocado (y su refresh token)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: Sesión cerrada. }
+                  revoked_refresh_tokens: { type: integer, example: 1 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/auth/logout-all:
+    post:
+      tags: [Autenticación]
+      summary: Cerrar todas las sesiones
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      responses:
+        '200':
+          description: Todos los tokens del usuario revocados
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: Se cerraron todas las sesiones. }
+                  revoked_tokens: { type: integer, example: 2 }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/user:
+    get:
+      tags: [Perfil]
+      summary: Perfil del usuario autenticado
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      responses:
+        '200':
+          description: Datos del usuario
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+    put:
+      tags: [Perfil]
+      summary: Actualizar el perfil
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string, maxLength: 150 }
+                email: { type: string, format: email }
+                phone: { type: string, nullable: true }
+      responses:
+        '200':
+          description: Usuario actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/User' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/user/password:
+    put:
+      tags: [Perfil]
+      summary: Cambiar la contraseña (revoca las demás sesiones)
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [current_password, password, password_confirmation]
+              properties:
+                current_password: { type: string, format: password }
+                password: { type: string, format: password, minLength: 8 }
+                password_confirmation: { type: string, format: password }
+      responses:
+        '200':
+          description: Contraseña actualizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/businesses:
+    get:
+      tags: [Público]
+      summary: Directorio de negocios activos
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: city, in: query, schema: { type: string } }
+        - { name: category, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Listado paginado de negocios
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Business' }
+
+  /api/businesses/{business}:
+    get:
+      tags: [Público]
+      summary: Ficha pública de un negocio con sus tarjetas
+      parameters:
+        - $ref: '#/components/parameters/BusinessId'
+      responses:
+        '200':
+          description: Negocio con tarjetas activas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Business' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/customer/cards:
+    get:
+      tags: [Cliente]
+      summary: Mis tarjetas de fidelidad
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [active, completed, expired, blocked] } }
+        - { name: business_id, in: query, schema: { type: string, format: uuid } }
+        - { name: with_stamps, in: query, schema: { type: boolean } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Tarjetas del cliente con su progreso
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/CustomerCard' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+
+  /api/customer/cards/join:
+    post:
+      tags: [Cliente]
+      summary: Unirse a un programa escaneando el QR del negocio
+      description: |
+        Acepta el `code` del negocio (texto plano, payload JSON del QR, URL con `?code=` o
+        deep link) o el `loyalty_card_id`. Es idempotente: si el cliente ya tenía tarjeta,
+        devuelve `200` con `already_joined: true` y el progreso intacto.
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                code: { type: string, description: 'Contenido del QR (obligatorio si no se envía loyalty_card_id)', example: CAFE2026 }
+                loyalty_card_id: { type: string, format: uuid }
+      responses:
+        '201':
+          description: Alta realizada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomerCardResponse' }
+        '200':
+          description: Ya estaba unido al programa
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/CustomerCardResponse' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/customer/cards/{customerCard}:
+    parameters:
+      - $ref: '#/components/parameters/CustomerCardId'
+    get:
+      tags: [Cliente]
+      summary: Detalle de una de mis tarjetas (con últimos sellos)
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      responses:
+        '200':
+          description: Tarjeta con sellos y recompensas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/CustomerCard' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    delete:
+      tags: [Cliente]
+      summary: Salir del programa (conserva el progreso)
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      responses:
+        '200':
+          description: Tarjeta archivada (borrado lógico)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/customer/cards/{customerCard}/stamps:
+    get:
+      tags: [Cliente]
+      summary: Historial de sellos de una tarjeta
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/CustomerCardId'
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Sellos paginados
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Stamp' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/customer/cards/{customerCard}/rewards:
+    get:
+      tags: [Cliente]
+      summary: Recompensas disponibles y cuáles puedo canjear
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/CustomerCardId'
+      responses:
+        '200':
+          description: Recompensas del programa con `can_redeem` y `missing_stamps`
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      allOf:
+                        - $ref: '#/components/schemas/Reward'
+                        - type: object
+                          properties:
+                            can_redeem: { type: boolean }
+                            missing_stamps: { type: integer }
+                  progress: { $ref: '#/components/schemas/Progress' }
+
+  /api/customer/cards/{customerCard}/qr:
+    get:
+      tags: [Cliente]
+      summary: QR que el negocio escanea para sellar
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/CustomerCardId'
+      responses:
+        '200':
+          description: Payload del QR (JSON) y su SVG
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QrCode' }
+
+  /api/customer/cards/{customerCard}/redeem:
+    post:
+      tags: [Cliente]
+      summary: Solicitar el canje de una recompensa
+      description: |
+        Descuenta los sellos necesarios y reserva una unidad de stock. Devuelve el código
+        `PP-XXXXXXXX` que el cliente muestra en el negocio. No se admiten dos canjes
+        pendientes en la misma tarjeta.
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/CustomerCardId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reward_id]
+              properties:
+                reward_id: { type: string, format: uuid }
+                notes: { type: string, nullable: true }
+      responses:
+        '201':
+          description: Canje solicitado (pendiente de validación)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data: { $ref: '#/components/schemas/Redemption' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/customer/redemptions:
+    get:
+      tags: [Cliente]
+      summary: Mis canjes
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, completed, rejected, cancelled] } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Canjes paginados
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Redemption' }
+
+  /api/customer/redemptions/{redemption}:
+    get:
+      tags: [Cliente]
+      summary: Detalle de un canje (incluye el código a mostrar)
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/RedemptionId'
+      responses:
+        '200':
+          description: Canje
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Redemption' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/customer/redemptions/{redemption}/cancel:
+    post:
+      tags: [Cliente]
+      summary: Cancelar un canje pendiente (devuelve sellos y stock)
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/RedemptionId'
+      responses:
+        '200':
+          description: Canje cancelado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data: { $ref: '#/components/schemas/Redemption' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/customer/promotions:
+    get:
+      tags: [Cliente]
+      summary: Promociones de los negocios donde tengo tarjeta
+      security: [{ OAuth2: [cliente, negocio, admin] }]
+      parameters:
+        - { name: business_id, in: query, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Promociones vigentes
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Promotion' }
+
+  /api/business/profile:
+    get:
+      tags: [Negocio]
+      summary: Mi negocio
+      security: [{ OAuth2: [negocio, admin] }]
+      responses:
+        '200':
+          description: Negocio con sus tarjetas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Business' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    put:
+      tags: [Negocio]
+      summary: Actualizar los datos del negocio
+      security: [{ OAuth2: [negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string, nullable: true }
+                category: { type: string, nullable: true }
+                phone: { type: string, nullable: true }
+                email: { type: string, format: email, nullable: true }
+                website: { type: string, nullable: true }
+                address: { type: string, nullable: true }
+                city: { type: string, nullable: true }
+                country: { type: string, nullable: true, minLength: 2, maxLength: 2 }
+                latitude: { type: number, nullable: true }
+                longitude: { type: number, nullable: true }
+      responses:
+        '200':
+          description: Negocio actualizado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Business' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/business/card-settings:
+    put:
+      tags: [Negocio]
+      summary: Configuración visual por defecto de las nuevas tarjetas
+      security: [{ OAuth2: [negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                primary_color: { type: string, example: '#F59E0B' }
+                secondary_color: { type: string, example: '#111827' }
+                text_color: { type: string, example: '#FFFFFF' }
+                stamp_icon: { type: string, example: coffee }
+                card_shape: { type: string, enum: [rounded, square, circle] }
+                welcome_message: { type: string }
+                required_stamps: { type: integer, minimum: 1, maximum: 100 }
+      responses:
+        '200':
+          description: Configuración guardada (el recurso devuelve `card_settings` fusionado)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Business' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/business/assets:
+    post:
+      tags: [Negocio]
+      summary: Subir logo, fondo o icono de sello del negocio
+      security: [{ OAuth2: [negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [type, file]
+              properties:
+                type: { type: string, enum: [logo, background, stamp_icon] }
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: Asset subido (devuelve las URLs actualizadas)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Business' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/business/assets/{type}:
+    delete:
+      tags: [Negocio]
+      summary: Eliminar un asset del negocio
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - { name: type, in: path, required: true, schema: { type: string, enum: [logo, background, stamp_icon] } }
+      responses:
+        '200':
+          description: Asset eliminado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Business' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/business/cards:
+    get:
+      tags: [Negocio]
+      summary: Tarjetas del negocio
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - { name: search, in: query, schema: { type: string } }
+        - { name: is_active, in: query, schema: { type: boolean } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Tarjetas paginadas
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/LoyaltyCard' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    post:
+      tags: [Negocio]
+      summary: Crear una tarjeta (opcionalmente con recompensas)
+      security: [{ OAuth2: [negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, maxLength: 150, example: Club del café }
+                description: { type: string, nullable: true }
+                required_stamps: { type: integer, minimum: 1, maximum: 100, example: 6 }
+                reward_description: { type: string, nullable: true }
+                terms: { type: string, nullable: true }
+                primary_color: { type: string, nullable: true }
+                secondary_color: { type: string, nullable: true }
+                text_color: { type: string, nullable: true }
+                is_active: { type: boolean, default: true }
+                is_public: { type: boolean, default: true }
+                expires_at: { type: string, format: date-time, nullable: true }
+                inherit_business_branding: { type: boolean, default: true, description: Hereda logo, fondo e icono del negocio }
+                settings: { type: object, additionalProperties: true }
+                rewards:
+                  type: array
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name: { type: string }
+                      description: { type: string, nullable: true }
+                      reward_type: { type: string, enum: [free_product, discount, gift, points, custom] }
+                      value: { type: number, nullable: true }
+                      required_stamps: { type: integer, minimum: 1, maximum: 100 }
+                      stock: { type: integer, nullable: true }
+                      is_active: { type: boolean }
+      responses:
+        '201':
+          description: Tarjeta creada con sus recompensas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/LoyaltyCard' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/business/cards/{loyaltyCard}:
+    parameters:
+      - $ref: '#/components/parameters/LoyaltyCardId'
+    get:
+      tags: [Negocio]
+      summary: Detalle de una tarjeta
+      security: [{ OAuth2: [negocio, admin] }]
+      responses:
+        '200':
+          description: Tarjeta con sus recompensas
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/LoyaltyCard' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+    put:
+      tags: [Negocio]
+      summary: Editar una tarjeta
+      security: [{ OAuth2: [negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string, nullable: true }
+                required_stamps: { type: integer, minimum: 1, maximum: 100 }
+                reward_description: { type: string, nullable: true }
+                terms: { type: string, nullable: true }
+                primary_color: { type: string, nullable: true }
+                secondary_color: { type: string, nullable: true }
+                text_color: { type: string, nullable: true }
+                is_active: { type: boolean }
+                is_public: { type: boolean }
+                expires_at: { type: string, format: date-time, nullable: true }
+                settings: { type: object, additionalProperties: true }
+      responses:
+        '200':
+          description: Tarjeta actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/LoyaltyCard' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Negocio]
+      summary: Archivar una tarjeta
+      security: [{ OAuth2: [negocio, admin] }]
+      responses:
+        '200':
+          description: Tarjeta archivada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+
+  /api/business/cards/{loyaltyCard}/upload-assets:
+    post:
+      tags: [Negocio]
+      summary: Subir logo, fondo o icono de sello de la tarjeta
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/LoyaltyCardId'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [type, file]
+              properties:
+                type: { type: string, enum: [logo, background, stamp_icon] }
+                file: { type: string, format: binary }
+      responses:
+        '200':
+          description: Asset subido (devuelve `logo_url`, `background_url` y `stamp_icon_url`)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/LoyaltyCard' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/business/cards/{loyaltyCard}/regenerate-join-code:
+    post:
+      tags: [Negocio]
+      summary: Regenerar el código de alta (y su QR)
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/LoyaltyCardId'
+      responses:
+        '200':
+          description: Nuevo código de alta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  join_code: { type: string, example: CAFE2026 }
+                  qr: { $ref: '#/components/schemas/QrCode' }
+
+  /api/business/cards/{loyaltyCard}/duplicate:
+    post:
+      tags: [Negocio]
+      summary: Duplicar la tarjeta con sus recompensas
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/LoyaltyCardId'
+      responses:
+        '201':
+          description: Copia creada (inactiva y con nuevo código de alta)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/LoyaltyCard' }
+
+  /api/business/cards/{loyaltyCard}/qr:
+    get:
+      tags: [Negocio]
+      summary: QR de alta del programa
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/LoyaltyCardId'
+      responses:
+        '200':
+          description: Payload del QR (JSON) y su SVG
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/QrCode' }
+
+  /api/business/cards/{loyaltyCard}/stats:
+    get:
+      tags: [Negocio]
+      summary: Métricas del programa
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/LoyaltyCardId'
+      responses:
+        '200':
+          description: Clientes, sellos, recompensas y canjes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  loyalty_card_id: { type: string, format: uuid }
+                  customers: { type: integer }
+                  customers_completed: { type: integer }
+                  stamps_total: { type: integer }
+                  stamps_last_30_days: { type: integer }
+                  rewards_earned: { type: integer }
+                  rewards_redeemed: { type: integer }
+                  rewards_available: { type: integer }
+                  redemptions_completed: { type: integer }
+                  rewards_defined: { type: integer }
+                  generated_at: { type: string, format: date-time }
+
+  /api/business/cards/{loyaltyCard}/rewards:
+    parameters:
+      - $ref: '#/components/parameters/LoyaltyCardId'
+    get:
+      tags: [Negocio]
+      summary: Recompensas de una tarjeta
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - { name: is_active, in: query, schema: { type: boolean } }
+      responses:
+        '200':
+          description: Recompensas ordenadas por sellos requeridos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Reward' }
+    post:
+      tags: [Negocio]
+      summary: Crear una recompensa
+      security: [{ OAuth2: [negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string, example: Café gratis }
+                description: { type: string, nullable: true }
+                reward_type: { type: string, enum: [free_product, discount, gift, points, custom] }
+                value: { type: number, nullable: true }
+                required_stamps: { type: integer, minimum: 1, maximum: 100 }
+                stock: { type: integer, nullable: true, description: 'null = stock ilimitado' }
+                is_active: { type: boolean }
+      responses:
+        '201':
+          description: Recompensa creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Reward' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/business/rewards/{reward}:
+    parameters:
+      - $ref: '#/components/parameters/RewardId'
+    put:
+      tags: [Negocio]
+      summary: Editar una recompensa
+      security: [{ OAuth2: [negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string, nullable: true }
+                reward_type: { type: string, enum: [free_product, discount, gift, points, custom] }
+                value: { type: number, nullable: true }
+                required_stamps: { type: integer, minimum: 1, maximum: 100 }
+                stock: { type: integer, nullable: true }
+                is_active: { type: boolean }
+      responses:
+        '200':
+          description: Recompensa actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Reward' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Negocio]
+      summary: Eliminar una recompensa
+      security: [{ OAuth2: [negocio, admin] }]
+      responses:
+        '200':
+          description: Recompensa eliminada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/business/promotions:
+    get:
+      tags: [Negocio]
+      summary: Promociones del negocio
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - { name: is_active, in: query, schema: { type: boolean } }
+        - { name: loyalty_card_id, in: query, schema: { type: string, format: uuid } }
+        - { name: search, in: query, schema: { type: string } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Promociones paginadas
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Promotion' }
+    post:
+      tags: [Negocio]
+      summary: Crear una promoción
+      security: [{ OAuth2: [negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, example: 2x1 en cafés los martes }
+                description: { type: string, nullable: true }
+                loyalty_card_id: { type: string, format: uuid, nullable: true }
+                discount_type: { type: string, enum: [percentage, fixed, gift, points] }
+                discount_value: { type: number, nullable: true }
+                code: { type: string, nullable: true, example: MARTES2X1 }
+                terms: { type: string, nullable: true }
+                starts_at: { type: string, format: date-time, nullable: true }
+                ends_at: { type: string, format: date-time, nullable: true }
+                max_redemptions: { type: integer, nullable: true }
+                is_active: { type: boolean }
+      responses:
+        '201':
+          description: Promoción creada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Promotion' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/business/promotions/{promotion}:
+    parameters:
+      - $ref: '#/components/parameters/PromotionId'
+    get:
+      tags: [Negocio]
+      summary: Detalle de una promoción
+      security: [{ OAuth2: [negocio, admin] }]
+      responses:
+        '200':
+          description: Promoción
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Promotion' }
+    put:
+      tags: [Negocio]
+      summary: Editar una promoción
+      security: [{ OAuth2: [negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                title: { type: string }
+                description: { type: string, nullable: true }
+                loyalty_card_id: { type: string, format: uuid, nullable: true }
+                discount_type: { type: string, enum: [percentage, fixed, gift, points] }
+                discount_value: { type: number, nullable: true }
+                code: { type: string, nullable: true }
+                terms: { type: string, nullable: true }
+                starts_at: { type: string, format: date-time, nullable: true }
+                ends_at: { type: string, format: date-time, nullable: true }
+                max_redemptions: { type: integer, nullable: true }
+                is_active: { type: boolean }
+      responses:
+        '200':
+          description: Promoción actualizada
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/Promotion' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+    delete:
+      tags: [Negocio]
+      summary: Eliminar una promoción
+      security: [{ OAuth2: [negocio, admin] }]
+      responses:
+        '200':
+          description: Promoción eliminada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+
+  /api/business/stamps/scan:
+    post:
+      tags: [Negocio]
+      summary: Registrar un sello escaneando el QR del cliente
+      description: |
+        Valida que la tarjeta pertenece al negocio y está activa, aplica el *throttle*
+        anti-fraude (`CARD_STAMP_THROTTLE_SECONDS`) y el máximo diario
+        (`CARD_MAX_STAMPS_PER_DAY`), registra el sello y actualiza el progreso dentro de
+        una transacción. Si la tarjeta llega a `required_stamps` pasa a `completed`.
+      security: [{ OAuth2: [negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, description: 'Contenido del QR del cliente (JSON, URL o texto)', example: AB12CD34EF }
+                purchase_amount: { type: number, format: float, nullable: true, example: 4.5 }
+                notes: { type: string, nullable: true }
+                stamped_at: { type: string, format: date-time, nullable: true }
+                source: { type: string, enum: [scan, manual, import, adjustment] }
+                idempotency_key: { type: string, nullable: true }
+      responses:
+        '201':
+          description: Sello registrado (incluye el resumen de la tarjeta)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: Sello registrado. }
+                  data: { $ref: '#/components/schemas/Stamp' }
+                  customer_card:
+                    type: object
+                    properties:
+                      id: { type: string, format: uuid }
+                      code: { type: string }
+                      stamps_count: { type: integer }
+                      required_stamps: { type: integer }
+                      progress_percentage: { type: number }
+                      status: { type: string }
+                      reward_available: { type: boolean }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/business/stamps/recent:
+    get:
+      tags: [Negocio]
+      summary: Últimos escaneos del negocio
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
+      responses:
+        '200':
+          description: Sellos más recientes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Stamp' }
+
+  /api/business/stamps:
+    get:
+      tags: [Negocio]
+      summary: Historial de sellos con filtros
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - { name: loyalty_card_id, in: query, schema: { type: string, format: uuid } }
+        - { name: customer_card_id, in: query, schema: { type: string, format: uuid } }
+        - { name: source, in: query, schema: { type: string, enum: [scan, manual, import, adjustment] } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Sellos paginados
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Stamp' }
+
+  /api/business/stamps/{stamp}:
+    delete:
+      tags: [Negocio]
+      summary: Anular un sello (revierte el progreso)
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - { name: stamp, in: path, required: true, schema: { type: string, format: uuid } }
+      responses:
+        '200':
+          description: Sello anulado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  stamp_id: { type: string, format: uuid }
+                  customer_card: { $ref: '#/components/schemas/CustomerCard' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /api/business/customers:
+    get:
+      tags: [Negocio]
+      summary: Clientes del negocio (tarjetas emitidas)
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - { name: search, in: query, description: Nombre, email o código de tarjeta, schema: { type: string } }
+        - { name: loyalty_card_id, in: query, schema: { type: string, format: uuid } }
+        - { name: status, in: query, schema: { type: string, enum: [active, completed, expired, blocked] } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Tarjetas de clientes paginadas
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/CustomerCard' }
+
+  /api/business/customers/{customerCard}:
+    get:
+      tags: [Negocio]
+      summary: Ficha del cliente
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/CustomerCardId'
+      responses:
+        '200':
+          description: Tarjeta con sellos y canjes
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/CustomerCard' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
+  /api/business/redemptions:
+    get:
+      tags: [Negocio]
+      summary: Canjes del negocio
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - { name: status, in: query, schema: { type: string, enum: [pending, completed, rejected, cancelled] } }
+        - { name: from, in: query, schema: { type: string, format: date-time } }
+        - { name: to, in: query, schema: { type: string, format: date-time } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Canjes paginados (con cliente y recompensa)
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/Redemption' }
+
+  /api/business/redemptions/complete:
+    post:
+      tags: [Negocio]
+      summary: Validar un canje por código
+      description: |
+        El negocio teclea o escanea el código `PP-XXXXXXXX` que muestra la app del cliente.
+        Marca el canje como `completed`, registra quién lo aprobó y suma la recompensa
+        entregada en la tarjeta del cliente.
+      security: [{ OAuth2: [negocio, admin] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, example: PP-8F3K2L9Q }
+      responses:
+        '200':
+          description: Canje validado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string, example: Canje validado. Entrega la recompensa al cliente. }
+                  data: { $ref: '#/components/schemas/Redemption' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/business/redemptions/{redemption}/approve:
+    post:
+      tags: [Negocio]
+      summary: Validar un canje por identificador
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/RedemptionId'
+      responses:
+        '200':
+          description: Canje validado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data: { $ref: '#/components/schemas/Redemption' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/business/redemptions/{redemption}/reject:
+    post:
+      tags: [Negocio]
+      summary: Rechazar un canje (devuelve sellos y stock)
+      security: [{ OAuth2: [negocio, admin] }]
+      parameters:
+        - $ref: '#/components/parameters/RedemptionId'
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason: { type: string, nullable: true, example: El cliente no se presentó }
+      responses:
+        '200':
+          description: Canje rechazado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  data: { $ref: '#/components/schemas/Redemption' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+components:
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      description: OAuth2 de Laravel Passport 13
+      flows:
+        authorizationCode:
+          authorizationUrl: /oauth/authorize
+          tokenUrl: /oauth/token
+          refreshUrl: /oauth/token
+          scopes:
+            cliente: Tarjetas, sellos, canjes y promociones del cliente autenticado
+            negocio: Gestión del negocio (tarjetas, recompensas, promociones, escaneos y canjes)
+            admin: Administración global de la plataforma
+        password:
+          tokenUrl: /oauth/token
+          refreshUrl: /oauth/token
+          scopes:
+            cliente: Tarjetas, sellos, canjes y promociones del cliente autenticado
+            negocio: Gestión del negocio
+            admin: Administración global de la plataforma
+    Bearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    PerPage:
+      name: per_page
+      in: query
+      description: Elementos por página (1-100)
+      schema: { type: integer, default: 15, minimum: 1, maximum: 100 }
+    Page:
+      name: page
+      in: query
+      description: Número de página
+      schema: { type: integer, minimum: 1, default: 1 }
+    BusinessId:
+      name: business
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    LoyaltyCardId:
+      name: loyaltyCard
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    CustomerCardId:
+      name: customerCard
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RewardId:
+      name: reward
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    PromotionId:
+      name: promotion
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+    RedemptionId:
+      name: redemption
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
+
+  responses:
+    AuthSuccess:
+      description: Usuario autenticado con tokens OAuth2
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              message: { type: string }
+              user: { $ref: '#/components/schemas/User' }
+              authorization: { $ref: '#/components/schemas/TokenResponse' }
+    Unauthorized:
+      description: Token ausente, inválido o caducado
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { message: 'Unauthenticated.', error: unauthenticated }
+    Forbidden:
+      description: Sin permisos (rol, scope o Policy)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          examples:
+            scope:
+              value: { message: 'This action requires the following scope(s): negocio.', error: missing_scope, required_scopes: [negocio] }
+            policy:
+              value: { message: 'Esa tarjeta no pertenece a otro negocio.', error: forbidden }
+    NotFound:
+      description: Recurso inexistente
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { message: 'No query results for model [App\\Models\\Business].', error: not_found }
+    ValidationError:
+      description: Error de validación
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/ValidationError' }
+    TooManyRequests:
+      description: Demasiadas peticiones (throttle)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example: { message: 'Too Many Attempts.', error: too_many_requests }
+    OAuthNotConfigured:
+      description: Falta el cliente OAuth2 o las claves RSA
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            message: El servidor OAuth2 no está configurado correctamente.
+            error: oauth_not_configured
+            hint: Ejecuta `php artisan passport:install` y `php artisan punto-plus:oauth-clients --write-env`.
+
+  schemas:
+    Message:
+      type: object
+      properties:
+        message: { type: string }
+
+    Error:
+      type: object
+      properties:
+        message: { type: string }
+        error: { type: string, description: Código estable del error }
+        hint: { type: string, description: Detalle adicional (sólo en errores de configuración) }
+        required_scopes:
+          type: array
+          items: { type: string }
+          description: Scopes que faltaban (sólo en `missing_scope`)
+
+    ValidationError:
+      type: object
+      properties:
+        message: { type: string, example: Los datos enviados no son correctos. }
+        error: { type: string, example: validation_error }
+        errors:
+          type: object
+          additionalProperties:
+            type: array
+            items: { type: string }
+
+    OAuthError:
+      type: object
+      properties:
+        error: { type: string, example: invalid_grant }
+        error_description: { type: string }
+        hint: { type: string }
+        message: { type: string }
+
+    TokenResponse:
+      type: object
+      properties:
+        access_token: { type: string }
+        refresh_token: { type: string, nullable: true }
+        token_type: { type: string, example: Bearer }
+        expires_in: { type: integer, example: 86400 }
+        scope: { type: string, example: cliente }
+
+    Paginated:
+      type: object
+      properties:
+        data: { type: array, items: {} }
+        links:
+          type: object
+          properties:
+            first: { type: string, nullable: true }
+            last: { type: string, nullable: true }
+            prev: { type: string, nullable: true }
+            next: { type: string, nullable: true }
+        meta:
+          type: object
+          properties:
+            current_page: { type: integer }
+            from: { type: integer, nullable: true }
+            last_page: { type: integer }
+            path: { type: string }
+            per_page: { type: integer }
+            to: { type: integer, nullable: true }
+            total: { type: integer }
+
+    User:
+      type: object
+      properties:
+        id: { type: integer, example: 3 }
+        name: { type: string, example: Marta Ruiz }
+        email: { type: string, format: email }
+        phone: { type: string, nullable: true }
+        role: { type: string, enum: [cliente, negocio, admin] }
+        role_label: { type: string, example: Cliente }
+        is_active: { type: boolean }
+        email_verified_at: { type: string, format: date-time, nullable: true }
+        last_login_at: { type: string, format: date-time, nullable: true }
+        business: { nullable: true, allOf: [{ $ref: '#/components/schemas/Business' }] }
+        cards_count: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Business:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Café Aurora }
+        slug: { type: string, example: cafe-aurora }
+        description: { type: string, nullable: true }
+        category: { type: string, nullable: true }
+        phone: { type: string, nullable: true }
+        email: { type: string, nullable: true }
+        website: { type: string, nullable: true }
+        address: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        country: { type: string, nullable: true, example: ES }
+        latitude: { type: number, nullable: true }
+        longitude: { type: number, nullable: true }
+        logo_url: { type: string, nullable: true }
+        background_url: { type: string, nullable: true }
+        stamp_icon_url: { type: string, nullable: true }
+        card_settings: { type: object, additionalProperties: true }
+        is_active: { type: boolean }
+        owner: { nullable: true, allOf: [{ $ref: '#/components/schemas/User' }] }
+        loyalty_cards:
+          type: array
+          items: { $ref: '#/components/schemas/LoyaltyCard' }
+        loyalty_cards_count: { type: integer, nullable: true }
+        customers_count: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    LoyaltyCard:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        business_id: { type: string, format: uuid }
+        name: { type: string, example: Club del café }
+        slug: { type: string }
+        description: { type: string, nullable: true }
+        required_stamps: { type: integer, example: 6 }
+        reward_description: { type: string, nullable: true }
+        terms: { type: string, nullable: true }
+        logo_url: { type: string, nullable: true }
+        background_url: { type: string, nullable: true }
+        stamp_icon_url: { type: string, nullable: true }
+        primary_color: { type: string, nullable: true }
+        secondary_color: { type: string, nullable: true }
+        text_color: { type: string, nullable: true }
+        join_code: { type: string, example: CAFE2026 }
+        join_url: { type: string, format: uri }
+        qr: { nullable: true, allOf: [{ $ref: '#/components/schemas/QrCode' }] }
+        is_active: { type: boolean }
+        is_public: { type: boolean }
+        expires_at: { type: string, format: date-time, nullable: true }
+        settings: { type: object, additionalProperties: true }
+        business: { nullable: true, allOf: [{ $ref: '#/components/schemas/Business' }] }
+        rewards:
+          type: array
+          items: { $ref: '#/components/schemas/Reward' }
+        rewards_count: { type: integer, nullable: true }
+        customers_count: { type: integer, nullable: true }
+        stamps_count: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Reward:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        business_id: { type: string, format: uuid }
+        loyalty_card_id: { type: string, format: uuid }
+        name: { type: string, example: Café gratis }
+        description: { type: string, nullable: true }
+        image_url: { type: string, nullable: true }
+        reward_type: { type: string, enum: [free_product, discount, gift, points, custom] }
+        reward_type_label: { type: string }
+        value: { type: number, nullable: true }
+        required_stamps: { type: integer }
+        stock: { type: integer, nullable: true }
+        has_stock: { type: boolean }
+        is_active: { type: boolean }
+        redemptions_count: { type: integer, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    Progress:
+      type: object
+      properties:
+        stamps_count: { type: integer }
+        required_stamps: { type: integer }
+        stamps_remaining: { type: integer }
+        progress_percentage: { type: number, example: 33.33 }
+        completed: { type: boolean }
+
+    CustomerCard:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, description: 'Código que viaja en el QR del cliente', example: AB12CD34EF }
+        user_id: { type: integer }
+        loyalty_card_id: { type: string, format: uuid }
+        business_id: { type: string, format: uuid }
+        stamps_count: { type: integer }
+        required_stamps: { type: integer }
+        stamps_remaining: { type: integer }
+        progress_percentage: { type: number }
+        progress: { $ref: '#/components/schemas/Progress' }
+        status: { type: string, enum: [active, completed, expired, blocked] }
+        status_label: { type: string }
+        rewards_earned: { type: integer }
+        rewards_redeemed: { type: integer }
+        total_stamps_earned: { type: integer }
+        completed_at: { type: string, format: date-time, nullable: true }
+        last_stamp_at: { type: string, format: date-time, nullable: true }
+        expires_at: { type: string, format: date-time, nullable: true }
+        loyalty_card: { nullable: true, allOf: [{ $ref: '#/components/schemas/LoyaltyCard' }] }
+        business: { nullable: true, allOf: [{ $ref: '#/components/schemas/Business' }] }
+        user: { nullable: true, allOf: [{ $ref: '#/components/schemas/User' }] }
+        stamps:
+          type: array
+          items: { $ref: '#/components/schemas/Stamp' }
+        created_at: { type: string, format: date-time }
+
+    CustomerCardResponse:
+      type: object
+      properties:
+        message: { type: string }
+        already_joined: { type: boolean }
+        data: { $ref: '#/components/schemas/CustomerCard' }
+
+    Stamp:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        customer_card_id: { type: string, format: uuid }
+        business_id: { type: string, format: uuid }
+        loyalty_card_id: { type: string, format: uuid }
+        source: { type: string, enum: [scan, manual, import, adjustment] }
+        source_label: { type: string }
+        purchase_amount: { type: number, nullable: true, example: 4.5 }
+        notes: { type: string, nullable: true }
+        stamped_at: { type: string, format: date-time }
+        registered_by: { nullable: true, allOf: [{ $ref: '#/components/schemas/User' }] }
+        customer_card: { nullable: true, allOf: [{ $ref: '#/components/schemas/CustomerCard' }] }
+        created_at: { type: string, format: date-time }
+
+    Promotion:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        business_id: { type: string, format: uuid }
+        loyalty_card_id: { type: string, format: uuid, nullable: true }
+        title: { type: string, example: 2x1 en cafés los martes }
+        description: { type: string, nullable: true }
+        image_url: { type: string, nullable: true }
+        terms: { type: string, nullable: true }
+        discount_type: { type: string, enum: [percentage, fixed, gift, points] }
+        discount_type_label: { type: string }
+        discount_value: { type: number, nullable: true }
+        code: { type: string, nullable: true }
+        starts_at: { type: string, format: date-time, nullable: true }
+        ends_at: { type: string, format: date-time, nullable: true }
+        is_active: { type: boolean }
+        is_active_now: { type: boolean }
+        max_redemptions: { type: integer, nullable: true }
+        redemptions_count: { type: integer }
+        business: { nullable: true, allOf: [{ $ref: '#/components/schemas/Business' }] }
+        created_at: { type: string, format: date-time }
+
+    Redemption:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string, example: PP-8F3K2L9Q }
+        status: { type: string, enum: [pending, completed, rejected, cancelled] }
+        status_label: { type: string }
+        stamps_used: { type: integer }
+        redeemed_at: { type: string, format: date-time, nullable: true }
+        approved_at: { type: string, format: date-time, nullable: true }
+        notes: { type: string, nullable: true }
+        customer_card_id: { type: string, format: uuid }
+        reward_id: { type: string, format: uuid }
+        business_id: { type: string, format: uuid }
+        user_id: { type: integer }
+        reward: { nullable: true, allOf: [{ $ref: '#/components/schemas/Reward' }] }
+        customer_card: { nullable: true, allOf: [{ $ref: '#/components/schemas/CustomerCard' }] }
+        business: { nullable: true, allOf: [{ $ref: '#/components/schemas/Business' }] }
+        user: { nullable: true, allOf: [{ $ref: '#/components/schemas/User' }] }
+        approved_by: { nullable: true, allOf: [{ $ref: '#/components/schemas/User' }] }
+        created_at: { type: string, format: date-time }
+
+    QrCode:
+      type: object
+      description: |
+        QR generado por el servidor. `payload` es el objeto que la app puede volver
+        a codificar sin conexión; `json` es la cadena exacta que viaja dentro del QR
+        y `svg` su representación gráfica (null si bacon/bacon-qr-code no está instalado).
+
+        - `loyalty_card.join` (lo escanea el cliente para unirse): `join_code`, `loyalty_card_id`,
+          `business_id`, `business` (nombre) y `url`.
+        - `customer_card.identify` (lo escanea el negocio para sellar): `code`, `loyalty_card_id`,
+          `business_id`, `holder` (nombre del cliente), `stamps` y `required_stamps`.
+      properties:
+        payload:
+          type: object
+          description: Contenido estructurado del QR (para regenerarlo en la app)
+          properties:
+            v: { type: integer, example: 1, description: Versión del formato del payload }
+            type: { type: string, enum: [loyalty_card.join, customer_card.identify] }
+            join_code: { type: string, nullable: true, description: 'Código de alta del programa (payload loyalty_card.join)' }
+            code: { type: string, nullable: true, description: 'Código de la tarjeta del cliente (payload customer_card.identify)' }
+            loyalty_card_id: { type: string, format: uuid, nullable: true }
+            business_id: { type: string, format: uuid, nullable: true }
+            business: { type: string, nullable: true, description: Nombre del negocio (si venía cargado en la petición) }
+            holder: { type: string, nullable: true, description: Nombre del cliente titular de la tarjeta }
+            stamps: { type: integer, nullable: true, example: 3, description: Sellos acumulados en el momento de generar el QR }
+            required_stamps: { type: integer, nullable: true, example: 10 }
+            url: { type: string, format: uri, nullable: true, example: 'https://puntoplus.test/join?code=CAFE2026' }
+        json: { type: string, description: Cadena JSON exacta que codifica el QR }
+        svg: { type: string, nullable: true, description: 'SVG del QR (null si bacon/bacon-qr-code no está instalado)' }
+
+security:
+  - Bearer: []
