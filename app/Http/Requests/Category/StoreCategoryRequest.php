@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Category;
 
+use App\Rules\CategoryIconInput;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -26,7 +27,7 @@ class StoreCategoryRequest extends FormRequest
                 'mimes:'.implode(',', config('punto_plus.assets.allowed_extensions')),
                 'max:'.config('punto_plus.assets.max_kilobytes'),
             ]
-            : ['nullable', 'string', 'max:255'];
+            : ['nullable', new CategoryIconInput];
 
         return [
             'name' => ['required', 'string', 'max:255', Rule::unique('categories', 'name')],

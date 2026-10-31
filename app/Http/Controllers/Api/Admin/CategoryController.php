@@ -40,8 +40,11 @@ class CategoryController extends Controller
     {
         $data = $request->validated();
         $icon = $request->file('icon');
+        $iconDataUri = $icon === null && is_string($data['icon'] ?? null) && str_starts_with($data['icon'], 'data:')
+            ? $data['icon']
+            : null;
 
-        if ($icon !== null) {
+        if ($icon !== null || $iconDataUri !== null) {
             unset($data['icon']);
         }
 
@@ -49,6 +52,9 @@ class CategoryController extends Controller
 
         if ($icon !== null) {
             $category->icon = $this->assets->storeCategoryIcon($icon, (string) $category->getKey());
+            $category->save();
+        } elseif ($iconDataUri !== null) {
+            $category->icon = $this->assets->storeCategoryIconDataUri($iconDataUri, (string) $category->getKey());
             $category->save();
         }
 
@@ -66,7 +72,10 @@ class CategoryController extends Controller
     {
         $data = $request->validated();
         $icon = $request->file('icon');
-        $hasIconValue = array_key_exists('icon', $data);
+        $iconDataUri = $icon === null && is_string($data['icon'] ?? null) && str_starts_with($data['icon'], 'data:')
+            ? $data['icon']
+            : null;
+        $hasIconValue = array_key_exists('icon', $data) && $icon === null && $iconDataUri === null;
         $iconValue = $data['icon'] ?? null;
         unset($data['icon']);
 
@@ -76,6 +85,12 @@ class CategoryController extends Controller
             $category->icon = $this->assets->replaceCategoryIcon(
                 $category->icon,
                 $icon,
+                (string) $category->getKey(),
+            );
+        } elseif ($iconDataUri !== null) {
+            $category->icon = $this->assets->replaceCategoryIconDataUri(
+                $category->icon,
+                $iconDataUri,
                 (string) $category->getKey(),
             );
         } elseif ($hasIconValue) {

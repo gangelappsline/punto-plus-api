@@ -5,6 +5,8 @@ namespace App\Services;
 use App\Support\Media;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use InvalidArgumentException;
 
 /**
  * Guarda y reemplaza los assets de marca (logo, fondo, sello) en el disco
@@ -65,15 +67,52 @@ final class AssetService
     }
 
     /**
+     * Decodifica y guarda un data URI de imagen en el disco público.
+     */
+    public function storeCategoryIconDataUri(string $dataUri, string $categoryId): string
+    {
+        if (! preg_match('#^data:(image/(?:jpeg|png|webp));base64,([A-Za-z0-9+/]*={0,2})$#D', $dataUri, $matches)) {
+            throw new InvalidArgumentException('El data URI del icono no es válido.');
+        }
+
+        $contents = base64_decode($matches[2], true);
+        $image = $contents === false ? false : @getimagesizefromstring($contents);
+
+        if ($contents === false || $image === false || ($image['mime'] ?? null) !== $matches[1]) {
+            throw new InvalidArgumentException('El contenido del icono no coincide con el formato declarado.');
+        }
+
+        $extension = match ($image['mime']) {
+            'image/jpeg' => 'jpg',
+            'image/png' => 'png',
+            'image/webp' => 'webp',
+            default => throw new InvalidArgumentException('Formato de icono no permitido.'),
+        };
+
+        $path = 'categories/'.$categoryId.'/'.Str::uuid().'.'.$extension;
+        Storage::disk('public')->put($path, $contents);
+
+        return $path;
+    }
+
+    /**
+     * Reemplaza el icono de categoría por un data URI en el disco público.
+     */
+    public function replaceCategoryIconDataUri(?string $currentPath, string $dataUri, string $categoryId): string
+    {
+        $path = $this->storeCategoryIconDataUri($dataUri, $categoryId);
+        $this->deleteCategoryIcon($currentPath);
+
+        return $path;
+    }
+
+    /**
      * Reemplaza el icono de categoría en el disco público.
      */
     public function replaceCategoryIcon(?string $currentPath, UploadedFile $file, string $categoryId): string
     {
         $path = $this->storeCategoryIcon($file, $categoryId);
-
-        if ($currentPath !== null && $currentPath !== $path && ! str_starts_with($currentPath, 'http')) {
-            Storage::disk('public')->delete($currentPath);
-        }
+        $this->deleteCategoryIcon($currentPath);
 
         return $path;
     }
