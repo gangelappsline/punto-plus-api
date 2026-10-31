@@ -31,7 +31,10 @@ Route::prefix('/public')->group(function () {
 Route::middleware(['auth:api'])->group(function () {
     Route::get('/business/card', [App\Http\Controllers\Api\Public\BusinessController::class, 'card']);
 });
+Route::prefix('admin')->middleware('role:admin')->group(function (): void {
 
+
+});
 // ---------------------------------------------------------------------------
 // Autenticación (público)
 // ---------------------------------------------------------------------------
