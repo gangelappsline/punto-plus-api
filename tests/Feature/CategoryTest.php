@@ -19,7 +19,9 @@ class CategoryTest extends TestCase
         parent::setUp();
 
         $this->createOAuthClients();
+        config(['punto_plus.assets.disk' => 'local']);
         Storage::fake('public');
+        Storage::fake('local');
     }
 
     public function test_admin_puede_crear_actualizar_listar_y_eliminar_categorias(): void
@@ -41,6 +43,7 @@ class CategoryTest extends TestCase
 
         $category = Category::firstOrFail();
         Storage::disk('public')->assertExists($category->icon);
+        Storage::disk('local')->assertMissing($category->icon);
 
         $this->actingAsApi($admin)
             ->getJson('/api/admin/categories')
