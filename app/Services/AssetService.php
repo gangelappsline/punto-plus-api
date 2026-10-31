@@ -53,4 +53,12 @@ final class AssetService
     {
         return 'loyalty-cards/'.$loyaltyCardId;
     }
+
+    /**
+     * Directorio del icono de una categoría.
+     */
+    public function categoryDirectory(string $categoryId): string
+    {
+        return 'categories/'.$categoryId;
+    }
 }

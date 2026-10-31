@@ -159,6 +159,7 @@ además el middleware `role:negocio,admin`.
 | Tabla | PK | Descripción | Cascadas |
 |---|---|---|---|
 | `users` | id | Clientes, negocios y admins (`role`) | — |
+| `categories` | id | Catálogo de categorías (`name`, `icon`) administrado por el equipo Punto Plus | — |
 | `businesses` | **uuid** | Negocio, branding (`logo_path`, `background_path`, `stamp_icon_path`) y `card_settings` (JSON) | `user_id` → null on delete |
 | `loyalty_cards` | **uuid** | Tarjeta de sellos del negocio (`required_stamps`, `join_code`, colores, assets) | `business_id` → **cascade** |
 | `rewards` | **uuid** | Premio al completar un ciclo (`required_stamps`, `stock`) | `loyalty_card_id` → **cascade** |
@@ -263,10 +264,22 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `POST` | `/api/business/redemptions/{redemption}/approve` | Validar por id |
 | `POST` | `/api/business/redemptions/{redemption}/reject` | Rechazar (devuelve sellos y stock) |
 
+### Administrador (scope `admin`, middleware `role:admin`)
+
+| Método | Ruta | Descripción |
+|---|---|---|
+| `GET` | `/api/admin/categories` | Listar categorías (`?search=`, `?per_page=`) |
+| `POST` | `/api/admin/categories` | Crear categoría (`name`, `icon` opcional como imagen o ruta) |
+| `GET` | `/api/admin/categories/{category}` | Consultar una categoría |
+| `PUT` / `PATCH` | `/api/admin/categories/{category}` | Actualizar nombre o icono (`icon: null` lo elimina) |
+| `DELETE` | `/api/admin/categories/{category}` | Eliminar categoría y su imagen subida |
+
 ### Público
 
 | Método | Ruta | Descripción |
 |---|---|---|
+| `GET` | `/api/categories` | Listar categorías (`?search=`, `?per_page=`; sin token) |
+| `GET` | `/api/public/categories` | Alias público para consultar categorías |
 | `GET` | `/api/businesses` | Directorio de negocios (`?search=`, `?city=`, `?category=`) |
 | `GET` | `/api/businesses/{business}` | Ficha pública con sus tarjetas |
 | `GET` | `/` | Índice de la API |

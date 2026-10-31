@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BusinessController;
 use App\Http\Controllers\Api\CustomerCardController;
@@ -26,14 +27,14 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('/public')->group(function () {
     Route::get('/business/{slug}', [App\Http\Controllers\Api\Public\BusinessController::class, 'show']);
+    Route::get('/categories', [App\Http\Controllers\Api\Public\CategoryController::class, 'index'])->name('public.categories.index');
 });
 
 Route::middleware(['auth:api'])->group(function () {
     Route::get('/business/card', [App\Http\Controllers\Api\Public\BusinessController::class, 'card']);
 });
-Route::prefix('admin')->middleware('role:admin')->group(function (): void {
-
-
+Route::prefix('admin')->name('admin.')->middleware(['auth:api', 'role:admin'])->group(function (): void {
+    Route::apiResource('categories', AdminCategoryController::class);
 });
 // ---------------------------------------------------------------------------
 // Autenticación (público)
@@ -49,6 +50,7 @@ Route::prefix('auth')->name('auth.')->middleware('throttle:auth')->group(functio
 // ---------------------------------------------------------------------------
 Route::get('businesses', [BusinessController::class, 'index'])->name('businesses.index');
 Route::get('businesses/{business}', [BusinessController::class, 'show'])->name('businesses.show');
+Route::get('categories', [App\Http\Controllers\Api\Public\CategoryController::class, 'index'])->name('categories.index');
 
 // ---------------------------------------------------------------------------
 // Rutas autenticadas (Bearer token de Passport)
