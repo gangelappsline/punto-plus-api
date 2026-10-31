@@ -32,7 +32,7 @@ class CategoryTest extends TestCase
             (string) file_get_contents(base_path('tests/Fixtures/images/logo.png')),
         );
 
-        $created = $this->actingAsApi($admin)->post('/api/admin/categories', [
+        $created = $this->actingAsApi($admin, [])->post('/api/admin/categories', [
             'name' => 'Restaurantes',
             'icon' => $icon,
         ]);
@@ -45,17 +45,17 @@ class CategoryTest extends TestCase
         Storage::disk('public')->assertExists($category->icon);
         Storage::disk('local')->assertMissing($category->icon);
 
-        $this->actingAsApi($admin)
+        $this->actingAsApi($admin, [])
             ->getJson('/api/admin/categories')
             ->assertOk()
             ->assertJsonPath('data.0.id', $category->id);
 
-        $this->actingAsApi($admin)
+        $this->actingAsApi($admin, [])
             ->putJson('/api/admin/categories/'.$category->id, ['name' => 'Comida'])
             ->assertOk()
             ->assertJsonPath('data.name', 'Comida');
 
-        $this->actingAsApi($admin)
+        $this->actingAsApi($admin, [])
             ->deleteJson('/api/admin/categories/'.$category->id)
             ->assertOk();
 
