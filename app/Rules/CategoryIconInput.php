@@ -5,10 +5,7 @@ namespace App\Rules;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 
-/**
- * Acepta una ruta de icono ya existente o un data URI de imagen para guardarlo
- * en el disco público de categorías.
- */
+/** Valida un data URI de imagen o una cadena base64 sin prefijo. */
 class CategoryIconInput implements ValidationRule
 {
     public function validate(string $attribute, mixed $value, Closure $fail): void
@@ -18,15 +15,7 @@ class CategoryIconInput implements ValidationRule
         }
 
         if (! is_string($value)) {
-            $fail('El icono debe ser una ruta o una imagen codificada en base64.');
-
-            return;
-        }
-
-        if (! str_starts_with($value, 'data:')) {
-            if (mb_strlen($value) > 255) {
-                $fail('La ruta del icono no puede superar los 255 caracteres.');
-            }
+            $fail('El icono debe enviarse como una cadena base64.');
 
             return;
         }
@@ -40,25 +29,38 @@ class CategoryIconInput implements ValidationRule
             return;
         }
 
-        if (! preg_match('/\Adata:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+\/]*={0,2})\z/', $value, $matches)) {
-            $fail('El icono debe ser un data URI de imagen JPEG, PNG o WEBP válido.');
+        $declaredMime = null;
+        $encoded = $value;
+
+        if (str_starts_with($value, 'data:')) {
+            if (! preg_match('/\Adata:(image\/(?:jpeg|png|webp));base64,([A-Za-z0-9+\/]*={0,2})\z/', $value, $matches)) {
+                $fail('El icono debe ser un data URI JPEG, PNG o WEBP codificado en base64.');
+
+                return;
+            }
+
+            $declaredMime = $matches[1];
+            $encoded = $matches[2];
+        } elseif (! preg_match('/\A[A-Za-z0-9+\/]*={0,2}\z/', $encoded)) {
+            $fail('El icono debe ser una cadena base64 válida.');
 
             return;
         }
 
-        $contents = base64_decode($matches[2], true);
+        $contents = base64_decode($encoded, true);
 
-        if ($contents === false || strlen($contents) > $maxBytes) {
-            $fail('La imagen no puede superar los '.(int) config('punto_plus.assets.max_kilobytes', 4096).' KB.');
+        if ($contents === false || $contents === '' || strlen($contents) > $maxBytes) {
+            $fail('El icono debe ser una imagen base64 válida y no superar los '.(int) config('punto_plus.assets.max_kilobytes', 4096).' KB.');
 
             return;
         }
 
         $image = @getimagesizefromstring($contents);
         $allowedMimes = config('punto_plus.assets.allowed_mimes', ['image/jpeg', 'image/png', 'image/webp']);
+        $actualMime = is_array($image) ? ($image['mime'] ?? null) : null;
 
-        if ($image === false || ! in_array($image['mime'] ?? null, $allowedMimes, true) || $image['mime'] !== $matches[1]) {
-            $fail('El contenido del icono debe ser una imagen JPEG, PNG o WEBP válida y coincidir con su formato declarado.');
+        if (! is_array($image) || ! in_array($actualMime, $allowedMimes, true) || ($declaredMime !== null && $actualMime !== $declaredMime)) {
+            $fail('El contenido debe ser una imagen JPEG, PNG o WEBP válida y coincidir con el formato declarado.');
         }
     }
 }

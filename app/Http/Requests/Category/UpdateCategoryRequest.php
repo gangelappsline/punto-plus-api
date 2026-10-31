@@ -20,21 +20,9 @@ class UpdateCategoryRequest extends FormRequest
     {
         $category = $this->route('category');
 
-        $iconRules = $this->hasFile('icon')
-            ? [
-                'sometimes',
-                'nullable',
-                'file',
-                'image',
-                'mimetypes:'.implode(',', config('punto_plus.assets.allowed_mimes')),
-                'mimes:'.implode(',', config('punto_plus.assets.allowed_extensions')),
-                'max:'.config('punto_plus.assets.max_kilobytes'),
-            ]
-            : ['sometimes', 'nullable', new CategoryIconInput];
-
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255', Rule::unique('categories', 'name')->ignore($category)],
-            'icon' => $iconRules,
+            'icon' => ['sometimes', 'nullable', 'string', new CategoryIconInput],
         ];
     }
 }
