@@ -16,6 +16,7 @@ class MenuCategoryResource extends JsonResource
         return [
             'id' => $this->id,
             'business_id' => $this->business_id,
+            'source_category_id' => $this->source_category_id,
             'name' => $this->name,
             'description' => $this->description,
             'sort_order' => $this->sort_order,

@@ -77,6 +77,7 @@ class BusinessController extends Controller
 
         return new BusinessResource(
             $business->loadCount(['loyaltyCards', 'customerCards', 'promotions'])->load([
+                'categories.category',
                 'loyaltyCards' => fn ($query) => $query->withCount('customerCards'),
             ])
         );

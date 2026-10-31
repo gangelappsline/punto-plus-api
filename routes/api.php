@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BusinessController;
+use App\Http\Controllers\Api\BusinessOnboardingController;
 use App\Http\Controllers\Api\BusinessQrController;
 use App\Http\Controllers\Api\CustomerCardController;
 use App\Http\Controllers\Api\LoyaltyCardController;
@@ -105,6 +106,7 @@ Route::middleware('auth:api')->group(function (): void {
         // Perfil y configuración del negocio
         Route::get('profile', [BusinessController::class, 'mine'])->name('profile.show');
         Route::put('profile', [BusinessController::class, 'updateMine'])->name('profile.update');
+        Route::put('onboarding', [BusinessOnboardingController::class, 'saveStep'])->name('onboarding.save-step');
         Route::put('card-settings', [BusinessController::class, 'updateCardSettings'])->name('card-settings.update');
 
         // QR público del menú: preferencias, vista previa SVG y exportación raster.

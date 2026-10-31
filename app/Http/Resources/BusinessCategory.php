@@ -17,6 +17,7 @@ class BusinessCategory extends JsonResource
     {
         return [
             'id' => $this->id,
+            'category_id' => $this->category_id,
             'name' => $this->category->name,
             'icon' => $this->category->icon != null ? Storage::disk('public')->url($this->category->icon) : '',
             'sort_order' => $this->sort_order,
