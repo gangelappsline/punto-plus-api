@@ -269,7 +269,7 @@ los errores devuelven `message` y un campo `error` con código estable.
 | Método | Ruta | Descripción |
 |---|---|---|
 | `GET` | `/api/admin/categories` | Listar categorías (`?search=`, `?per_page=`) |
-| `POST` | `/api/admin/categories` | Crear categoría (`name`, `icon` opcional como imagen multipart, ruta o data URI base64) |
+| `POST` | `/api/admin/categories` | Crear categoría (`name`, `icon` opcional como cadena base64 o data URI de imagen) |
 | `GET` | `/api/admin/categories/{category}` | Consultar una categoría |
 | `PUT` / `PATCH` | `/api/admin/categories/{category}` | Actualizar nombre o icono (`icon: null` lo elimina) |
 | `DELETE` | `/api/admin/categories/{category}` | Eliminar categoría y su imagen subida |

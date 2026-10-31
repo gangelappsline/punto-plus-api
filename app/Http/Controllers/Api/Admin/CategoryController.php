@@ -39,22 +39,13 @@ class CategoryController extends Controller
     public function store(StoreCategoryRequest $request): JsonResponse
     {
         $data = $request->validated();
-        $icon = $request->file('icon');
-        $iconDataUri = $icon === null && is_string($data['icon'] ?? null) && str_starts_with($data['icon'], 'data:')
-            ? $data['icon']
-            : null;
-
-        if ($icon !== null || $iconDataUri !== null) {
-            unset($data['icon']);
-        }
+        $iconBase64 = $data['icon'] ?? null;
+        unset($data['icon']);
 
         $category = Category::create($data);
 
-        if ($icon !== null) {
-            $category->icon = $this->assets->storeCategoryIcon($icon, (string) $category->getKey());
-            $category->save();
-        } elseif ($iconDataUri !== null) {
-            $category->icon = $this->assets->storeCategoryIconDataUri($iconDataUri, (string) $category->getKey());
+        if ($iconBase64 !== null) {
+            $category->icon = $this->assets->storeCategoryIconBase64($iconBase64, (string) $category->getKey());
             $category->save();
         }
 
@@ -71,33 +62,21 @@ class CategoryController extends Controller
     public function update(UpdateCategoryRequest $request, Category $category): CategoryResource
     {
         $data = $request->validated();
-        $icon = $request->file('icon');
-        $iconDataUri = $icon === null && is_string($data['icon'] ?? null) && str_starts_with($data['icon'], 'data:')
-            ? $data['icon']
-            : null;
-        $hasIconValue = array_key_exists('icon', $data) && $icon === null && $iconDataUri === null;
-        $iconValue = $data['icon'] ?? null;
+        $hasIcon = array_key_exists('icon', $data);
+        $iconBase64 = $data['icon'] ?? null;
         unset($data['icon']);
 
         $category->fill($data);
 
-        if ($icon !== null) {
-            $category->icon = $this->assets->replaceCategoryIcon(
+        if ($hasIcon && $iconBase64 !== null) {
+            $category->icon = $this->assets->replaceCategoryIconBase64(
                 $category->icon,
-                $icon,
+                $iconBase64,
                 (string) $category->getKey(),
             );
-        } elseif ($iconDataUri !== null) {
-            $category->icon = $this->assets->replaceCategoryIconDataUri(
-                $category->icon,
-                $iconDataUri,
-                (string) $category->getKey(),
-            );
-        } elseif ($hasIconValue) {
-            if ($category->icon !== $iconValue) {
-                $this->assets->deleteCategoryIcon($category->icon);
-            }
-            $category->icon = $iconValue;
+        } elseif ($hasIcon) {
+            $this->assets->deleteCategoryIcon($category->icon);
+            $category->icon = null;
         }
 
         $category->save();

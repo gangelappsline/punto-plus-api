@@ -18,20 +18,9 @@ class StoreCategoryRequest extends FormRequest
      */
     public function rules(): array
     {
-        $iconRules = $this->hasFile('icon')
-            ? [
-                'nullable',
-                'file',
-                'image',
-                'mimetypes:'.implode(',', config('punto_plus.assets.allowed_mimes')),
-                'mimes:'.implode(',', config('punto_plus.assets.allowed_extensions')),
-                'max:'.config('punto_plus.assets.max_kilobytes'),
-            ]
-            : ['nullable', new CategoryIconInput];
-
         return [
             'name' => ['required', 'string', 'max:255', Rule::unique('categories', 'name')],
-            'icon' => $iconRules,
+            'icon' => ['nullable', 'string', new CategoryIconInput],
         ];
     }
 }

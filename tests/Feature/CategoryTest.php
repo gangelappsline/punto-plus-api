@@ -5,7 +5,6 @@ namespace Tests\Feature;
 use App\Models\Category;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
-use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\Storage;
 use Tests\Concerns\CreatesOAuthClients;
 use Tests\TestCase;
@@ -27,12 +26,9 @@ class CategoryTest extends TestCase
     public function test_admin_puede_crear_actualizar_listar_y_eliminar_categorias(): void
     {
         $admin = User::factory()->admin()->create();
-        $icon = UploadedFile::fake()->createWithContent(
-            'food.png',
-            (string) file_get_contents(base_path('tests/Fixtures/images/logo.png')),
-        );
+        $icon = 'data:image/png;base64,'.base64_encode((string) file_get_contents(base_path('tests/Fixtures/images/logo.png')));
 
-        $created = $this->actingAsApi($admin, [])->post('/api/admin/categories', [
+        $created = $this->actingAsApi($admin, [])->postJson('/api/admin/categories', [
             'name' => 'Restaurantes',
             'icon' => $icon,
         ]);
@@ -63,7 +59,7 @@ class CategoryTest extends TestCase
         Storage::disk('public')->assertMissing($category->icon);
     }
 
-    public function test_icono_en_data_uri_se_decodifica_y_se_guarda_en_el_disco_publico(): void
+    public function test_icono_data_uri_y_base64_se_guardan_en_el_disco_publico(): void
     {
         $admin = User::factory()->admin()->create();
         $contents = (string) file_get_contents(base_path('tests/Fixtures/images/logo.png'));
@@ -86,7 +82,7 @@ class CategoryTest extends TestCase
         $this->assertSame($contents, Storage::disk('public')->get($originalPath));
 
         $this->actingAsApi($admin, [])
-            ->putJson('/api/admin/categories/'.$category->id, ['icon' => $dataUri])
+            ->putJson('/api/admin/categories/'.$category->id, ['icon' => base64_encode($contents)])
             ->assertOk();
 
         $newPath = $category->fresh()->icon;
