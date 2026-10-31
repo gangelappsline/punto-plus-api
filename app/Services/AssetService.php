@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Support\Media;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * Guarda y reemplaza los assets de marca (logo, fondo, sello) en el disco
@@ -55,10 +56,37 @@ final class AssetService
     }
 
     /**
-     * Directorio del icono de una categoría.
+     * Guarda el icono de una categoría en el disco público, independientemente
+     * del disco configurado para los assets privados de negocio.
      */
-    public function categoryDirectory(string $categoryId): string
+    public function storeCategoryIcon(UploadedFile $file, string $categoryId): string
     {
-        return 'categories/'.$categoryId;
+        return $file->store('categories/'.$categoryId, ['disk' => 'public']);
+    }
+
+    /**
+     * Reemplaza el icono de categoría en el disco público.
+     */
+    public function replaceCategoryIcon(?string $currentPath, UploadedFile $file, string $categoryId): string
+    {
+        $path = $this->storeCategoryIcon($file, $categoryId);
+
+        if ($currentPath !== null && $currentPath !== $path && ! str_starts_with($currentPath, 'http')) {
+            Storage::disk('public')->delete($currentPath);
+        }
+
+        return $path;
+    }
+
+    /**
+     * Elimina un icono del disco público.
+     */
+    public function deleteCategoryIcon(?string $path): void
+    {
+        if (blank($path) || str_starts_with($path, 'http')) {
+            return;
+        }
+
+        Storage::disk('public')->delete($path);
     }
 }

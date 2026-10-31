@@ -2,9 +2,9 @@
 
 namespace App\Http\Resources;
 
-use App\Support\Media;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Facades\Storage;
 
 /**
  * @mixin \App\Models\Category
@@ -21,7 +21,9 @@ class Category extends JsonResource
         return [
             'id' => $this->id,
             'name' => $this->name,
-            'icon' => Media::url($this->icon),
+            'icon' => blank($this->icon)
+                ? null
+                : (str_starts_with($this->icon, 'http') ? $this->icon : Storage::disk('public')->url($this->icon)),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
         ];

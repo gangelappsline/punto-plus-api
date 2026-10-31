@@ -50,7 +50,7 @@ class CategoryController extends Controller
         $category = Category::create($data);
 
         if ($icon !== null) {
-            $category->icon = $this->assets->store($icon, $this->assets->categoryDirectory((string) $category->getKey()));
+            $category->icon = $this->assets->storeCategoryIcon($icon, (string) $category->getKey());
             $category->save();
         }
 
@@ -75,14 +75,14 @@ class CategoryController extends Controller
         $category->fill($data);
 
         if ($icon !== null) {
-            $category->icon = $this->assets->replace(
+            $category->icon = $this->assets->replaceCategoryIcon(
                 $category->icon,
                 $icon,
-                $this->assets->categoryDirectory((string) $category->getKey()),
+                (string) $category->getKey(),
             );
         } elseif ($hasIconValue) {
             if ($category->icon !== $iconValue) {
-                $this->assets->delete($category->icon);
+                $this->assets->deleteCategoryIcon($category->icon);
             }
             $category->icon = $iconValue;
         }
@@ -95,7 +95,7 @@ class CategoryController extends Controller
     /** DELETE /api/admin/categories/{category} */
     public function destroy(Category $category): JsonResponse
     {
-        $this->assets->delete($category->icon);
+        $this->assets->deleteCategoryIcon($category->icon);
         $category->delete();
 
         return response()->json(['message' => 'Categoría eliminada.']);
