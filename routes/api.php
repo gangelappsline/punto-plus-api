@@ -24,6 +24,14 @@ use Illuminate\Support\Facades\Route;
 |
 */
 
+Route::prefix('/public')->group(function () {
+    Route::get('/business/{slug}', [App\Http\Controllers\Api\Public\BusinessController::class, 'show']);
+});
+
+Route::middleware(['auth:api'])->group(function () {
+    Route::get('/business/card', [App\Http\Controllers\Api\Public\BusinessController::class, 'card']);
+});
+
 // ---------------------------------------------------------------------------
 // Autenticación (público)
 // ---------------------------------------------------------------------------

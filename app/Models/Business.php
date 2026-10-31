@@ -49,6 +49,11 @@ class Business extends Model
         return $this->belongsTo(User::class, 'user_id');
     }
 
+    public function categories(): HasMany
+    {
+        return $this->hasMany(BusinessCategory::class);
+    }
+
     public function loyaltyCards(): HasMany
     {
         return $this->hasMany(LoyaltyCard::class);

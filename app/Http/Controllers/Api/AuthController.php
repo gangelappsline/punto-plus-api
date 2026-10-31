@@ -55,11 +55,11 @@ class AuthController extends Controller
             ]);
 
             if ($role === UserRole::Negocio) {
-                $business = $data['business'];
-                $business['slug'] = $this->uniqueSlug($business['name']);
-                $business['card_settings'] = config('punto_plus.cards.default_settings', []);
+                //$business = $data['business'];
+                //$business['slug'] = $this->uniqueSlug($business['name']);
+                //$business['card_settings'] = config('punto_plus.cards.default_settings', []);
 
-                $user->business()->create($business);
+                $user->business()->create([]);
             }
 
             return $user;
@@ -93,7 +93,7 @@ class AuthController extends Controller
     {
         $data = $request->validated();
 
-        $user = User::with('business')->where('email', $data['email'])->first();
+        $user = User::where('email', $data['email'])->first();
 
         if ($user !== null && ! $user->is_active) {
             return response()->json([
@@ -102,26 +102,13 @@ class AuthController extends Controller
             ], 403);
         }
 
-        try {
-            $token = $this->issueToken(
-                email: $data['email'],
-                password: $data['password'],
-                user: $user,
-                requestedScopes: $data['scopes'] ?? null,
-                deviceName: $data['device_name'] ?? null,
-            );
-        } catch (OAuthServerException|InvalidCredentialsException) {
-            return $this->invalidCredentialsResponse();
-        } catch (OAuthConfigurationException $e) {
-            return $this->configurationErrorResponse($e);
-        }
-
+            $token = $user->createToken('auth_token_punto_plus')->accessToken;
         $user?->forceFill(['last_login_at' => now()])->save();
 
         return response()->json([
             'message' => 'Sesión iniciada.',
             'user' => new UserResource($user),
-            'authorization' => $token->toArray(),
+            'token' => $token,
         ]);
     }
 

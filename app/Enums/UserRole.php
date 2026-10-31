@@ -4,8 +4,8 @@ namespace App\Enums;
 
 enum UserRole: string
 {
-    case Cliente = 'cliente';
-    case Negocio = 'negocio';
+    case Cliente = 'client';
+    case Negocio = 'business';
     case Admin = 'admin';
 
     /**
@@ -14,8 +14,8 @@ enum UserRole: string
     public function scope(): string
     {
         return match ($this) {
-            self::Cliente => 'cliente',
-            self::Negocio => 'negocio',
+            self::Cliente => 'client',
+            self::Negocio => 'business',
             self::Admin => 'admin',
         };
     }
