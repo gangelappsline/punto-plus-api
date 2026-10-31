@@ -3,6 +3,7 @@
 use App\Http\Controllers\Api\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BusinessController;
+use App\Http\Controllers\Api\BusinessQrController;
 use App\Http\Controllers\Api\CustomerCardController;
 use App\Http\Controllers\Api\LoyaltyCardController;
 use App\Http\Controllers\Api\MenuCategoryController;
@@ -104,6 +105,13 @@ Route::middleware('auth:api')->group(function (): void {
         Route::get('profile', [BusinessController::class, 'mine'])->name('profile.show');
         Route::put('profile', [BusinessController::class, 'updateMine'])->name('profile.update');
         Route::put('card-settings', [BusinessController::class, 'updateCardSettings'])->name('card-settings.update');
+
+        // QR público del menú: preferencias, vista previa SVG y exportación raster.
+        Route::get('qr/settings', [BusinessQrController::class, 'showSettings'])->name('qr.settings.show');
+        Route::put('qr/settings', [BusinessQrController::class, 'updateSettings'])->name('qr.settings.update');
+        Route::patch('qr/settings', [BusinessQrController::class, 'updateSettings'])->name('qr.settings.patch');
+        Route::get('qr/preview.svg', [BusinessQrController::class, 'preview'])->name('qr.preview');
+        Route::get('qr/download/{format}', [BusinessQrController::class, 'download'])->name('qr.download');
 
         // Assets de marca: logo, fondo y sello por defecto
         Route::post('assets', [BusinessController::class, 'uploadAsset'])->name('assets.store');

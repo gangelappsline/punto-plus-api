@@ -153,6 +153,11 @@ class BusinessController extends Controller
         $this->assets->delete($business->{$field});
 
         $business->{$field} = null;
+
+        if ($type === 'logo' && ($business->qr_settings['include_logo'] ?? false)) {
+            $business->qr_settings = array_merge($business->qr_settings, ['include_logo' => false]);
+        }
+
         $business->save();
 
         return new BusinessResource($business);

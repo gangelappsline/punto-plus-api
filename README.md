@@ -20,7 +20,7 @@ negocio (web o app), con autenticación OAuth2 completa.
 - PHP 8.3+ con extensiones `pdo`, `mbstring`, `openssl`, `fileinfo`, `json`, `curl`.
 - Composer 2.
 - MySQL 8+ / PostgreSQL 14+ (o SQLite para desarrollo rápido).
-- Extensiones opcionales: `gd` o `imagick` (no son necesarias; los QR se generan en SVG).
+- Para exportar el QR de negocio como PNG/WebP: extensión PHP `gd`; WebP requiere que GD tenga `imagewebp`. La vista previa SVG no requiere GD.
 
 ## 2. Instalación
 
@@ -236,6 +236,9 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `GET` | `/api/business/profile` | Mi negocio |
 | `PUT` | `/api/business/profile` | Datos del negocio |
 | `PUT` | `/api/business/card-settings` | Configuración visual por defecto de las tarjetas |
+| `GET` / `PUT` / `PATCH` | `/api/business/qr/settings` | Consultar/actualizar diseño y destino del QR público del menú |
+| `GET` | `/api/business/qr/preview.svg` | Vista previa SVG del QR con el estilo actual |
+| `GET` | `/api/business/qr/download/{format}` | Descargar el QR en `png` o `webp` |
 | `POST` | `/api/business/assets` | Subir asset (`type`: `logo`, `background`, `stamp_icon`) |
 | `DELETE` | `/api/business/assets/{type}` | Eliminar asset |
 | `GET` / `POST` | `/api/business/menu/categories` | Listar/crear categorías del menú |
@@ -343,6 +346,31 @@ Dos payloads distintos, ambos autoexplicativos (la app puede regenerar el QR sin
 ```
 
 El backend normaliza lo que reciba el lector: JSON, URL con `?code=`, deep link o texto plano.
+
+Además, cada negocio configura su QR del menú desde `/api/business/qr/settings`. El destino inicial es
+`/api/public/business/{slug}/menu`; también se puede usar el sitio web del negocio o una URL propia.
+La configuración admite tamaño (256–2048 px), zona de silencio (4–12 módulos), colores hexadecimales
+con contraste legible, módulos cuadrados/punteados/redondeados, localizadores cuadrados/redondeados/
+circulares y el logo de marca centrado (escala 10–20%). La corrección de errores se fija en nivel H
+para mejorar la lectura y compensar el logo. La vista previa SVG es inmediata; los endpoints de descarga
+entregan PNG y WebP (GD con `imagewebp` es requisito para WebP).
+
+Ejemplo de actualización parcial:
+
+```json
+{
+  "destination_type": "menu",
+  "size": 1024,
+  "quiet_zone": 4,
+  "foreground_color": "#172033",
+  "background_color": "#FFFFFF",
+  "eye_color": "#2563EB",
+  "module_style": "rounded",
+  "eye_style": "square",
+  "include_logo": true,
+  "logo_scale": 16
+}
+```
 
 ## 8. Reglas de negocio
 
