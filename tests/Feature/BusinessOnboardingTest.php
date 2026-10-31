@@ -40,7 +40,7 @@ class BusinessOnboardingTest extends TestCase
         $category = Category::create(['name' => 'Bebidas']);
         $productId = (string) Str::uuid();
 
-        $this->actingAsApi($this->owner, [])->putJson('/api/business/onboarding', [
+        $this->actingAsApi($this->owner, [])->putJson('/api/business/card', [
             'step' => 'information',
             'information' => [
                 'name' => 'Café Aurora',
@@ -53,23 +53,21 @@ class BusinessOnboardingTest extends TestCase
                 'address' => 'Roma Norte, CDMX',
             ],
         ])->assertOk()
-            ->assertJsonPath('data.step', 'information')
-            ->assertJsonPath('data.business.name', 'Café Aurora')
-            ->assertJsonPath('data.business.card_settings.welcome_message', '¡Bienvenido!')
-            ->assertJsonPath('data.business.welcome_message', '¡Bienvenido!')
-            ->assertJsonPath('data.business.phone_numbers.1', '+525555555556');
+            ->assertJsonPath('name', 'Café Aurora')
+            ->assertJsonPath('card_settings.welcome_message', '¡Bienvenido!')
+            ->assertJsonPath('welcome_message', '¡Bienvenido!')
+            ->assertJsonPath('phone_numbers.1', '+525555555556');
 
         Storage::disk('public')->assertExists($this->business->fresh()->logo_path);
         Storage::disk('public')->assertExists($this->business->fresh()->background_path);
 
-        $this->actingAsApi($this->owner, [])->putJson('/api/business/onboarding', [
+        $this->actingAsApi($this->owner, [])->putJson('/api/business/card', [
             'step' => 'categories',
             'categories' => ['category_ids' => [$category->id]],
         ])->assertOk()
-            ->assertJsonPath('data.step', 'categories')
-            ->assertJsonPath('data.business.categories.0.name', 'Bebidas');
+            ->assertJsonPath('categories.0.name', 'Bebidas');
 
-        $this->actingAsApi($this->owner, [])->putJson('/api/business/onboarding', [
+        $this->actingAsApi($this->owner, [])->putJson('/api/business/card', [
             'step' => 'products',
             'products' => ['products' => [[
                 'id' => $productId,
@@ -81,7 +79,7 @@ class BusinessOnboardingTest extends TestCase
                 'position' => 2,
                 'available' => true,
             ]]],
-        ])->assertOk()->assertJsonPath('data.step', 'products');
+        ])->assertOk();
 
         $product = Product::with('images')->findOrFail($productId);
         $this->assertSame($this->business->getKey(), $product->business_id);
@@ -96,7 +94,7 @@ class BusinessOnboardingTest extends TestCase
             ->assertJsonPath('data.0.source_category_id', $category->id)
             ->assertJsonPath('data.0.products.0.id', $productId);
 
-        $this->actingAsApi($this->owner, [])->putJson('/api/business/onboarding', [
+        $this->actingAsApi($this->owner, [])->putJson('/api/business/card', [
             'step' => 'design',
             'design' => [
                 'primary_color' => '#123456',
@@ -105,8 +103,8 @@ class BusinessOnboardingTest extends TestCase
                 'menu_style' => 'grid',
             ],
         ])->assertOk()
-            ->assertJsonPath('data.business.menu_design.primary_color', '#123456')
-            ->assertJsonPath('data.business.menu_design.menu_style', 'grid');
+            ->assertJsonPath('menu_design.primary_color', '#123456')
+            ->assertJsonPath('menu_design.menu_style', 'grid');
     }
 
     public function test_selector_de_paso_es_obligatorio_y_productos_deben_usar_categorias_del_negocio(): void
@@ -122,11 +120,11 @@ class BusinessOnboardingTest extends TestCase
             ]]],
         ];
 
-        $this->actingAsApi($this->owner, [])->putJson('/api/business/onboarding', $payload)
+        $this->actingAsApi($this->owner, [])->putJson('/api/business/card', $payload)
             ->assertUnprocessable()
             ->assertJsonValidationErrors('products.products.0.category_id');
 
-        $this->actingAsApi($this->owner, [])->putJson('/api/business/onboarding', [
+        $this->actingAsApi($this->owner, [])->putJson('/api/business/card', [
             'information' => ['name' => 'Sin selector'],
         ])->assertUnprocessable()
             ->assertJsonValidationErrors('step');
