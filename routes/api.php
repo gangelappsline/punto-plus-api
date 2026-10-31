@@ -37,6 +37,7 @@ Route::prefix('/public')->group(function () {
 
 Route::middleware(['auth:api'])->group(function () {
     Route::get('/business/card', [App\Http\Controllers\Api\Public\BusinessController::class, 'card']);
+    Route::put('/business/card', [App\Http\Controllers\Api\Public\BusinessController::class, 'cardUpdate']);
 });
 Route::prefix('admin')->name('admin.')->middleware(['auth:api', 'role:admin'])->group(function (): void {
     Route::apiResource('categories', AdminCategoryController::class);

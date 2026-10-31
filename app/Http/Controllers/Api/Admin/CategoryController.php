@@ -29,7 +29,7 @@ class CategoryController extends Controller
         $categories = Category::query()
             ->when(filled($filters['search'] ?? null), fn ($query) => $query->where('name', 'like', '%'.$filters['search'].'%'))
             ->orderBy('name')
-            ->paginate($this->perPage($request))
+            ->paginate(50)
             ->withQueryString();
 
         return CategoryResource::collection($categories);
