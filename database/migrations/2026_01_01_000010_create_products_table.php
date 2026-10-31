@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('products', function (Blueprint $table) {
             $table->uuid('id')->primary();
             $table->foreignUuid('business_id')->constrained()->cascadeOnDelete();
-            $table->foreignId('menu_category_id')->constrained('menu_categories')->cascadeOnDelete();
+            $table->foreignId('category_id')->constrained('categories')->cascadeOnDelete();
             $table->string('name', 180);
             $table->text('description')->nullable();
             $table->decimal('price', 10, 2)->nullable();
@@ -19,7 +19,7 @@ return new class extends Migration
             $table->boolean('is_available')->default(true);
             $table->timestamps();
 
-            $table->index(['business_id', 'menu_category_id', 'is_available', 'sort_order']);
+            $table->index(['business_id', 'category_id', 'is_available', 'sort_order']);
         });
     }
 

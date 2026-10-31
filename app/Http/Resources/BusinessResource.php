@@ -35,6 +35,9 @@ class BusinessResource extends JsonResource
             'background_url' => $this->background_url,
             'stamp_icon_url' => $this->stamp_icon_url,
             'card_settings' => $this->defaultCardSettings(),
+            //'cards' => CardResource::collection($this->whenLoaded('cards')),
+            'promotions' => PromotionResource::collection($this->whenLoaded('promotions')),
+            'products' => ProductResource::collection($this->whenLoaded('products')),
 
             'is_active' => (bool) $this->is_active,
             'owner' => new UserResource($this->whenLoaded('owner')),
