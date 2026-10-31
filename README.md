@@ -264,7 +264,7 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `POST` | `/api/business/redemptions/{redemption}/approve` | Validar por id |
 | `POST` | `/api/business/redemptions/{redemption}/reject` | Rechazar (devuelve sellos y stock) |
 
-### Administrador (scope `admin`, middleware `role:admin`)
+### Administrador (auth:api + middleware `role:admin`; las rutas de categorías no requieren scope OAuth)
 
 | Método | Ruta | Descripción |
 |---|---|---|

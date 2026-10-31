@@ -11,9 +11,7 @@ use App\Services\AssetService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Laravel\Passport\Attributes\AuthorizeToken;
 
-#[AuthorizeToken(['admin'], anyScope: true)]
 class CategoryController extends Controller
 {
     public function __construct(private readonly AssetService $assets)
