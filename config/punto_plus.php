@@ -143,6 +143,22 @@ return [
     |--------------------------------------------------------------------------
     */
 
+    'business_qr' => [
+        'defaults' => [
+            'destination_type' => 'menu',
+            'custom_url' => null,
+            'size' => 1024,
+            'quiet_zone' => 4,
+            'foreground_color' => '#172033',
+            'background_color' => '#FFFFFF',
+            'eye_color' => '#2563EB',
+            'module_style' => 'rounded',
+            'eye_style' => 'square',
+            'include_logo' => false,
+            'logo_scale' => 16,
+        ],
+    ],
+
     'assets' => [
         'disk' => env('PUNTO_PLUS_ASSET_DISK', 'public'),
         'max_kilobytes' => (int) env('PUNTO_PLUS_ASSET_MAX_KB', 4096),

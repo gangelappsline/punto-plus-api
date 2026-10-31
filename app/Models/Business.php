@@ -20,7 +20,7 @@ use Illuminate\Database\Eloquent\SoftDeletes;
 #[Fillable([
     'user_id', 'name', 'slug', 'description', 'category', 'phone', 'email', 'website',
     'address', 'city', 'country', 'latitude', 'longitude',
-    'logo_path', 'background_path', 'stamp_icon_path', 'card_settings', 'is_active',
+    'logo_path', 'background_path', 'stamp_icon_path', 'card_settings', 'qr_settings', 'is_active',
 ])]
 class Business extends Model
 {
@@ -34,6 +34,7 @@ class Business extends Model
     {
         return [
             'card_settings' => 'array',
+            'qr_settings' => 'array',
             'is_active' => 'boolean',
             'latitude' => 'float',
             'longitude' => 'float',
