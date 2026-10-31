@@ -235,7 +235,7 @@ los errores devuelven `message` y un campo `error` con código estable.
 |---|---|---|
 | `GET` | `/api/business/profile` | Mi negocio |
 | `PUT` | `/api/business/profile` | Datos del negocio |
-| `PUT` | `/api/business/onboarding` | Guarda el paso indicado por `step`: `information`, `categories`, `products` o `design` |
+| `PUT` | `/api/business/card` | Guarda en el negocio del usuario autenticado el paso `information`, `categories`, `products` o `design` indicado por `step` |
 | `PUT` | `/api/business/card-settings` | Configuración visual por defecto de las tarjetas |
 | `GET` / `PUT` / `PATCH` | `/api/business/qr/settings` | Consultar/actualizar diseño y destino del QR público del menú |
 | `GET` | `/api/business/qr/preview.svg` | Vista previa SVG del QR con el estilo actual |
@@ -278,7 +278,7 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `POST` | `/api/business/redemptions/{redemption}/approve` | Validar por id |
 | `POST` | `/api/business/redemptions/{redemption}/reject` | Rechazar (devuelve sellos y stock) |
 
-`PUT /api/business/onboarding` requiere el selector `step` y guarda únicamente esa sección para persistir el asistente paso a paso:
+`PUT /api/business/card` requiere el selector `step` y guarda únicamente esa sección para persistir el asistente paso a paso:
 
 - `information`: incluye `name`, `description`, `welcome_message`, `logo_url`, `background_url`, `phone`, `phone_numbers[]` y `address`. Las imágenes JPEG/PNG/WebP en base64 o data URI se guardan en el disco público.
 - `categories`: `categories.category_ids[]` reemplaza la selección de categorías del negocio.
