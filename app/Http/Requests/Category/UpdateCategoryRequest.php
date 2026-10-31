@@ -2,6 +2,7 @@
 
 namespace App\Http\Requests\Category;
 
+use App\Rules\CategoryIconInput;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -29,7 +30,7 @@ class UpdateCategoryRequest extends FormRequest
                 'mimes:'.implode(',', config('punto_plus.assets.allowed_extensions')),
                 'max:'.config('punto_plus.assets.max_kilobytes'),
             ]
-            : ['sometimes', 'nullable', 'string', 'max:255'];
+            : ['sometimes', 'nullable', new CategoryIconInput];
 
         return [
             'name' => ['sometimes', 'required', 'string', 'max:255', Rule::unique('categories', 'name')->ignore($category)],

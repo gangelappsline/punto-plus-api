@@ -63,6 +63,38 @@ class CategoryTest extends TestCase
         Storage::disk('public')->assertMissing($category->icon);
     }
 
+    public function test_icono_en_data_uri_se_decodifica_y_se_guarda_en_el_disco_publico(): void
+    {
+        $admin = User::factory()->admin()->create();
+        $contents = (string) file_get_contents(base_path('tests/Fixtures/images/logo.png'));
+        $dataUri = 'data:image/png;base64,'.base64_encode($contents);
+
+        $response = $this->actingAsApi($admin, [])->postJson('/api/admin/categories', [
+            'name' => 'Panaderías',
+            'icon' => $dataUri,
+        ]);
+
+        $response->assertCreated()
+            ->assertJsonPath('data.name', 'Panaderías')
+            ->assertJsonPath('data.icon', fn ($url) => is_string($url) && str_contains($url, 'categories/'));
+
+        $category = Category::firstOrFail();
+        $originalPath = $category->icon;
+
+        $this->assertStringEndsWith('.png', $originalPath);
+        Storage::disk('public')->assertExists($originalPath);
+        $this->assertSame($contents, Storage::disk('public')->get($originalPath));
+
+        $this->actingAsApi($admin, [])
+            ->putJson('/api/admin/categories/'.$category->id, ['icon' => $dataUri])
+            ->assertOk();
+
+        $newPath = $category->fresh()->icon;
+        $this->assertNotSame($originalPath, $newPath);
+        Storage::disk('public')->assertExists($newPath);
+        Storage::disk('public')->assertMissing($originalPath);
+    }
+
     public function test_la_ruta_publica_lista_categorias_sin_autenticacion(): void
     {
         $category = Category::create(['name' => 'Cafeterías']);
