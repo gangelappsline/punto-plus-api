@@ -152,15 +152,19 @@ curl -X POST http://localhost:8000/api/auth/logout-all -H 'Authorization: Bearer
 
 El scope acompaña al rol, pero **la autorización fina la hacen las Policies**: un token `cliente`
 nunca puede leer tarjetas de otro cliente ni datos de un negocio. Las rutas de negocio exigen
-además el middleware `role:negocio,admin`.
+además el middleware `role:business,admin`.
 
 ## 4. Modelo de datos
 
 | Tabla | PK | Descripción | Cascadas |
 |---|---|---|---|
 | `users` | id | Clientes, negocios y admins (`role`) | — |
-| `categories` | id | Catálogo de categorías (`name`, `icon`) administrado por el equipo Punto Plus | — |
+| `categories` | id | Catálogo global (`name`, `icon`) administrado por el equipo Punto Plus | — |
 | `businesses` | **uuid** | Negocio, branding (`logo_path`, `background_path`, `stamp_icon_path`) y `card_settings` (JSON) | `user_id` → null on delete |
+| `menu_categories` | id | Categorías del menú, propiedad de un negocio | `business_id` → cascade |
+| `products` | **uuid** | Productos de una categoría de menú, precio base y disponibilidad | `business_id`/`menu_category_id` → cascade |
+| `product_presentations` | **uuid** | Presentaciones del producto con precio opcional que puede heredar el precio base | `product_id` → cascade |
+| `product_images` | id | De 1 a 5 imágenes públicas ordenadas por producto | `product_id` → cascade |
 | `loyalty_cards` | **uuid** | Tarjeta de sellos del negocio (`required_stamps`, `join_code`, colores, assets) | `business_id` → **cascade** |
 | `rewards` | **uuid** | Premio al completar un ciclo (`required_stamps`, `stock`) | `loyalty_card_id` → **cascade** |
 | `promotions` | **uuid** | Promociones del negocio (opcionalmente ligadas a una tarjeta) | `business_id` → **cascade** |
@@ -225,7 +229,7 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `POST` | `/api/customer/redemptions/{redemption}/cancel` | Cancelar un canje pendiente |
 | `GET` | `/api/customer/promotions` | Promociones de los negocios donde tengo tarjeta |
 
-### Negocio (scope `negocio`, middleware `role:negocio,admin`)
+### Negocio (scope OAuth `negocio`, middleware de rol `role:business,admin`)
 
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -234,6 +238,12 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `PUT` | `/api/business/card-settings` | Configuración visual por defecto de las tarjetas |
 | `POST` | `/api/business/assets` | Subir asset (`type`: `logo`, `background`, `stamp_icon`) |
 | `DELETE` | `/api/business/assets/{type}` | Eliminar asset |
+| `GET` / `POST` | `/api/business/menu/categories` | Listar/crear categorías del menú |
+| `GET` / `PUT` / `PATCH` / `DELETE` | `/api/business/menu/categories/{menuCategory}` | Consultar/editar/eliminar categoría del menú |
+| `GET` / `POST` | `/api/business/menu/categories/{menuCategory}/products` | Listar/crear productos con entre 1 y 5 fotos base64 |
+| `GET` / `PUT` / `PATCH` / `DELETE` | `/api/business/menu/products/{product}` | Consultar/editar/eliminar producto; `images` reemplaza todas las fotos si se envía |
+| `GET` / `POST` | `/api/business/menu/products/{product}/presentations` | Listar/crear presentaciones y sus precios opcionales |
+| `GET` / `PUT` / `PATCH` / `DELETE` | `/api/business/menu/products/{product}/presentations/{presentation}` | Consultar/editar/eliminar presentación |
 | `GET` | `/api/business/cards` | Listar tarjetas del negocio |
 | `POST` | `/api/business/cards` | Crear tarjeta (opcionalmente con `rewards[]`) |
 | `GET` | `/api/business/cards/{card}` | Detalle de la tarjeta |
@@ -264,6 +274,8 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `POST` | `/api/business/redemptions/{redemption}/approve` | Validar por id |
 | `POST` | `/api/business/redemptions/{redemption}/reject` | Rechazar (devuelve sellos y stock) |
 
+Las fotos se envían en `images` como data URIs o cadenas base64 de JPEG, PNG o WEBP; se requieren de 1 a 5. Cada presentación tiene un `price` opcional: si es `null`, hereda el precio base del producto. Los iconos de fotos en respuestas son URLs públicas.
+
 ### Administrador (auth:api + middleware `role:admin`; las rutas de categorías no requieren scope OAuth)
 
 | Método | Ruta | Descripción |
@@ -280,6 +292,7 @@ los errores devuelven `message` y un campo `error` con código estable.
 |---|---|---|
 | `GET` | `/api/categories` | Listar categorías (`?search=`, `?per_page=`; sin token) |
 | `GET` | `/api/public/categories` | Alias público para consultar categorías |
+| `GET` | `/api/public/business/{slug}/menu` | Menú público de un negocio (categorías, productos disponibles, fotos y presentaciones activas) |
 | `GET` | `/api/businesses` | Directorio de negocios (`?search=`, `?city=`, `?category=`) |
 | `GET` | `/api/businesses/{business}` | Ficha pública con sus tarjetas |
 | `GET` | `/` | Índice de la API |

@@ -7,7 +7,7 @@ use Illuminate\Http\Request;
 use Symfony\Component\HttpFoundation\Response;
 
 /**
- * Restringe una ruta a uno o varios roles: ->middleware('role:negocio,admin').
+ * Restringe una ruta a uno o varios valores de rol (por ejemplo, role:business,admin).
  */
 class EnsureUserHasRole
 {

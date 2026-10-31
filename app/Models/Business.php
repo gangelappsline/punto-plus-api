@@ -54,6 +54,16 @@ class Business extends Model
         return $this->hasMany(BusinessCategory::class);
     }
 
+    public function menuCategories(): HasMany
+    {
+        return $this->hasMany(MenuCategory::class);
+    }
+
+    public function products(): HasMany
+    {
+        return $this->hasMany(Product::class);
+    }
+
     public function loyaltyCards(): HasMany
     {
         return $this->hasMany(LoyaltyCard::class);

@@ -5,6 +5,9 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BusinessController;
 use App\Http\Controllers\Api\CustomerCardController;
 use App\Http\Controllers\Api\LoyaltyCardController;
+use App\Http\Controllers\Api\MenuCategoryController;
+use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\ProductPresentationController;
 use App\Http\Controllers\Api\PromotionController;
 use App\Http\Controllers\Api\RedemptionController;
 use App\Http\Controllers\Api\RewardController;
@@ -27,6 +30,7 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('/public')->group(function () {
     Route::get('/business/{slug}', [App\Http\Controllers\Api\Public\BusinessController::class, 'show']);
+    Route::get('/business/{slug}/menu', [App\Http\Controllers\Api\Public\MenuController::class, 'show'])->name('public.business.menu');
     Route::get('/categories', [App\Http\Controllers\Api\Public\CategoryController::class, 'index'])->name('public.categories.index');
 });
 
@@ -91,10 +95,10 @@ Route::middleware('auth:api')->group(function (): void {
 
     /*
     |--------------------------------------------------------------------------
-    | Área negocio  (middleware: role:negocio)
-    |--------------------------------------------------------------------------
-    */
-    Route::prefix('business')->name('business.')->middleware('role:negocio,admin')->group(function (): void {
+| Área negocio  (middleware: role:business,admin)
+|--------------------------------------------------------------------------
+*/
+    Route::prefix('business')->name('business.')->middleware('role:business,admin')->group(function (): void {
 
         // Perfil y configuración del negocio
         Route::get('profile', [BusinessController::class, 'mine'])->name('profile.show');
@@ -104,6 +108,22 @@ Route::middleware('auth:api')->group(function (): void {
         // Assets de marca: logo, fondo y sello por defecto
         Route::post('assets', [BusinessController::class, 'uploadAsset'])->name('assets.store');
         Route::delete('assets/{type}', [BusinessController::class, 'destroyAsset'])->name('assets.destroy');
+
+        // Menú de productos y categorías propias del negocio.
+        Route::apiResource('menu/categories', MenuCategoryController::class)
+            ->parameters(['categories' => 'menuCategory']);
+        Route::get('menu/categories/{menuCategory}/products', [ProductController::class, 'indexForCategory'])->name('menu.products.index');
+        Route::post('menu/categories/{menuCategory}/products', [ProductController::class, 'storeForCategory'])->name('menu.products.store');
+        Route::get('menu/products/{product}', [ProductController::class, 'show'])->name('menu.products.show');
+        Route::put('menu/products/{product}', [ProductController::class, 'update'])->name('menu.products.update');
+        Route::patch('menu/products/{product}', [ProductController::class, 'update']);
+        Route::delete('menu/products/{product}', [ProductController::class, 'destroy'])->name('menu.products.destroy');
+        Route::get('menu/products/{product}/presentations', [ProductPresentationController::class, 'index'])->name('menu.presentations.index');
+        Route::post('menu/products/{product}/presentations', [ProductPresentationController::class, 'store'])->name('menu.presentations.store');
+        Route::get('menu/products/{product}/presentations/{presentation}', [ProductPresentationController::class, 'show'])->name('menu.presentations.show');
+        Route::put('menu/products/{product}/presentations/{presentation}', [ProductPresentationController::class, 'update'])->name('menu.presentations.update');
+        Route::patch('menu/products/{product}/presentations/{presentation}', [ProductPresentationController::class, 'update']);
+        Route::delete('menu/products/{product}/presentations/{presentation}', [ProductPresentationController::class, 'destroy'])->name('menu.presentations.destroy');
 
         // Tarjetas de fidelidad
         Route::get('cards', [LoyaltyCardController::class, 'index'])->name('cards.index');
