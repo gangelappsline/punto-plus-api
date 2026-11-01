@@ -173,6 +173,7 @@ nunca puede leer tarjetas de otro cliente ni datos de un negocio.
 | `customer_cards` | **uuid** | Tarjeta de un cliente (progreso, `status`, `code`) | `user_id`/`loyalty_card_id`/`business_id` → **cascade** |
 | `stamps` | **uuid** | Compra escaneada (`source`, `purchase_amount`, `stamped_at`) | `customer_card_id` → **cascade** |
 | `redemptions` | **uuid** | Canjes (`code`, `status`, `stamps_used`) | `customer_card_id` → **cascade** |
+| `whatsapp_messages` | **uuid** | Envíos de WhatsApp, mensajes entrantes y acuses de entrega/lectura (`direction`, `status`, `wa_message_id`) | `business_id` → null on delete |
 | `oauth_*` | | Tablas de Passport (clientes, tokens, códigos) | — |
 
 Índices en `business_id`, `user_id` y `loyalty_card_id`, más índices compuestos con fechas
@@ -283,6 +284,9 @@ En `PUT /api/business/card`, el paso `information` acepta `logo_url` y `backgrou
 | `POST` | `/api/business/redemptions/complete` | **Validar canje por código** |
 | `POST` | `/api/business/redemptions/{redemption}/approve` | Validar por id |
 | `POST` | `/api/business/redemptions/{redemption}/reject` | Rechazar (devuelve sellos y stock) |
+| `POST` | `/api/business/whatsapp/messages` | **Enviar WhatsApp** al cliente (texto libre `text` o plantilla `template`) |
+| `GET` | `/api/business/whatsapp/messages` | Historial de WhatsApp (`?direction=`, `?status=`, `?search=`) |
+| `GET` | `/api/business/whatsapp/templates` | Plantillas de la cuenta de WhatsApp y su estado de aprobación |
 
 `PUT /api/business/card` requiere el selector `step` y guarda únicamente esa sección para persistir el asistente paso a paso:
 
@@ -323,6 +327,7 @@ Las fotos se envían en `images` como data URIs o cadenas base64 de JPEG, PNG o 
 | `GET` | `/api/public/business/{slug}/menu` | Menú público de un negocio (categorías, productos disponibles, fotos y presentaciones activas) |
 | `GET` | `/api/businesses` | Directorio de negocios (`?search=`, `?city=`, `?category=`) |
 | `GET` | `/api/businesses/{business}` | Ficha pública con sus tarjetas |
+| `GET` / `POST` | `/api/webhooks/whatsapp` | Webhook de WhatsApp Cloud API (handshake de Meta y eventos firmados) |
 | `GET` | `/` | Índice de la API |
 | `GET` | `/up` | Health check |
 
@@ -431,6 +436,10 @@ Ejemplo de actualización parcial:
 | 422 | `validation_error` (+ `errors`) | Validación de FormRequest |
 | 429 | `too_many_requests` | Límite de peticiones |
 | 503 | `oauth_not_configured` | Faltan las claves/cliente OAuth2 (`hint` con el detalle) |
+| 403 | `invalid_signature` | La firma `X-Hub-Signature-256` del webhook de WhatsApp no es válida |
+| 502 | `whatsapp_error` | Meta rechazó el mensaje (`code`, `subcode` y `type` en la respuesta) |
+| 503 | `whatsapp_disabled` | Integración de WhatsApp apagada (`WHATSAPP_ENABLED=false`) |
+| 503 | `whatsapp_not_configured` | Faltan credenciales de WhatsApp (`missing` con las variables) |
 
 ## 10. Pruebas
 
@@ -444,14 +453,16 @@ php artisan test --filter=StampTest
 - Los clientes OAuth2 se crean al vuelo (`tests/Concerns/CreatesOAuthClients`), de modo que los
   tests de `login`/`refresh` recorren el password grant real de Passport.
 - Cobertura: registro/login/refresh/logout, tarjetas (CRUD, assets, QR, stats), alta por QR,
-  sellado (throttle, pertenencia, completar), canjes (solicitar/aprobar/rechazar/cancelar) y
-  flujo completo sello → canje → validación.
+  sellado (throttle, pertenencia, completar), canjes (solicitar/aprobar/rechazar/cancelar),
+  flujo completo sello → canje → validación, promociones y negocios cercanos del cliente, y
+  WhatsApp (envío con `Http::fake`, historial, plantillas, webhook firmado y acuses).
 
 ### Verificación antes de subir cambios
 
 ```bash
 composer validate --strict            # composer.json (incluidas las restricciones de versión)
-php artisan route:list --path=api     # 56 rutas de /api (+ /oauth/* de Passport)
+php artisan route:list --path=api     # rutas de /api (+ /oauth/* de Passport)
+php artisan punto-plus:whatsapp-test +5215512345678 --help   # integración de WhatsApp
 php artisan migrate:fresh --seed      # migraciones + datos de demo
 composer run test                     # suite completa
 php artisan punto-plus:expire-cards --dry-run
@@ -479,30 +490,59 @@ php artisan schedule:work          # o cron: * * * * * php /ruta/artisan schedul
 - El programador purga tokens (`passport:purge`), canjes antiguos (`model:prune`) y tarjetas/sellos
   vencidos (`punto-plus:expire-cards --dry-run` para auditar sin escribir) cada noche.
 
-## 12. Estructura
+## 12. WhatsApp Cloud API
+
+La API puede enviar mensajes de WhatsApp (avisos de sellos, promociones, recordatorios de
+canje) y recibir las respuestas del cliente por webhook.
+
+```bash
+php artisan migrate                                            # crea whatsapp_messages
+php artisan punto-plus:whatsapp-test +5215512345678            # prueba real de envío
+php artisan punto-plus:whatsapp-test +5215512345678 --template=hello_world --language=en_US
+```
+
+- `POST /api/business/whatsapp/messages` envía texto libre (`type: text`, sólo dentro de la
+  ventana de 24 h) o una plantilla aprobada (`type: template`). El teléfono se normaliza a E.164
+  (`WHATSAPP_DEFAULT_COUNTRY_CODE` completa los números de 10 dígitos).
+- `GET /api/business/whatsapp/messages` devuelve el historial: envíos, mensajes entrantes y
+  acuses (`queued → sent → delivered → read`, o `failed` con el `code` de Meta).
+- `GET /api/business/whatsapp/templates` lista las plantillas de la WABA y su estado.
+- `GET|POST /api/webhooks/whatsapp` es el webhook: el `GET` responde el `hub.challenge` y el
+  `POST` valida `X-Hub-Signature-256` con el App Secret antes de guardar nada.
+
+Variables en `.env` (`WHATSAPP_*`) y **guía completa de lo que hay que configurar en Meta** en
+[`docs/whatsapp.md`](docs/whatsapp.md): crear la app, WABA, número, token permanente, webhook,
+plantillas, modo Live y errores frecuentes.
+
+## 13. Estructura
 
 ```text
 app/
-├── Console/Commands/                          # punto-plus:oauth-clients, punto-plus:expire-cards
-├── Enums/                                     # UserRole, CardStatus, StampSource, ...
+├── Console/Commands/                          # punto-plus:oauth-clients, expire-cards, whatsapp-test
+├── Enums/                                     # UserRole, CardStatus, WhatsAppStatus, ...
 ├── Events/ + Listeners/                       # CardCompleted, StampRegistered, ...
-├── Exceptions/                                # OAuthConfigurationException, ...
+├── Exceptions/                                # OAuthConfigurationException, WhatsAppException
 ├── Http/
 │   ├── Controllers/Api/                       # Auth, User, Business, LoyaltyCard, CustomerCard,
-│   │                                          # Stamp, Promotion, Reward, Redemption
-│   ├── Controllers/Web/                       # login por sesión para OAuth2
+│   │   ├── Admin/                             # Stamp, Promotion, Reward, Redemption (+ admin CRUD)
+│   │   ├── Business/                          # Configuration, WhatsApp
+│   │   ├── Client/                            # Promotion, NearMe
+│   │   ├── Public/                            # catálogo y menú públicos
+│   │   └── Webhooks/                          # WhatsApp
 │   ├── Middleware/                            # ForceJsonResponse, EnsureUserHasRole
-│   ├── Requests/                              # 19 FormRequests (validación en español)
-│   └── Resources/                             # 8 JsonResources
-├── Models/                                    # 8 modelos Eloquent (UUID + SoftDeletes)
-├── Policies/                                  # 7 Policies
+│   ├── Requests/                              # FormRequests (validación en español)
+│   └── Resources/                             # JsonResources (Admin/, Client/, raíz)
+├── Models/                                    # Eloquent (UUID; WhatsAppMessage)
+├── Policies/                                  # Policies del dominio
 ├── Services/
 │   ├── AssetService.php  CustomerCardService.php  QrCodeService.php
 │   ├── RedemptionService.php  StampService.php
-│   └── OAuth/TokenBroker.php                  # password/refresh grant desde la API
-└── Support/                                   # Media, OAuth/TokenResponse
+│   ├── OAuth/TokenBroker.php                  # password/refresh grant desde la API
+│   └── WhatsApp/{WhatsAppClient,WhatsAppMessenger}.php
+└── Support/                                   # Media, PhoneNumber, OAuth/TokenResponse
+docs/whatsapp.md                               # guía de configuración en Meta
 ```
 
-## 13. Licencia
+## 14. Licencia
 
 MIT.

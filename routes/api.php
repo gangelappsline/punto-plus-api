@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\BusinessController;
 use App\Http\Controllers\Api\BusinessQrController;
 use App\Http\Controllers\Api\CustomerCardController;
 use App\Http\Controllers\Api\LoyaltyCardController;
+use App\Http\Controllers\Api\Business\WhatsAppController as BusinessWhatsAppController;
 use App\Http\Controllers\Api\BusinessCategoryController;
 use App\Http\Controllers\Api\Client\NearMeController as ClientNearMeController;
 use App\Http\Controllers\Api\Client\PromotionController as ClientPromotionController;
@@ -17,6 +18,7 @@ use App\Http\Controllers\Api\RedemptionController;
 use App\Http\Controllers\Api\RewardController;
 use App\Http\Controllers\Api\StampController;
 use App\Http\Controllers\Api\UserController;
+use App\Http\Controllers\Api\Webhooks\WhatsAppWebhookController;
 use Illuminate\Support\Facades\Route;
 
 /*
@@ -67,6 +69,14 @@ Route::prefix('auth')->name('auth.')->middleware('throttle:auth')->group(functio
 Route::get('businesses', [BusinessController::class, 'index'])->name('businesses.index');
 Route::get('businesses/{business}', [BusinessController::class, 'show'])->name('businesses.show');
 Route::get('categories', [App\Http\Controllers\Api\Public\CategoryController::class, 'index'])->name('categories.index');
+
+// ---------------------------------------------------------------------------
+// Webhooks (públicos: Meta no envía token; se valida la firma o el verify token)
+// ---------------------------------------------------------------------------
+Route::prefix('webhooks')->name('webhooks.')->group(function (): void {
+    Route::get('whatsapp', [WhatsAppWebhookController::class, 'verify'])->name('whatsapp.verify');
+    Route::post('whatsapp', [WhatsAppWebhookController::class, 'receive'])->name('whatsapp.receive');
+});
 
 // ---------------------------------------------------------------------------
 // Rutas autenticadas (Bearer token de Passport)
@@ -187,6 +197,11 @@ Route::middleware('auth:api')->group(function (): void {
         Route::get('stamps/recent', [StampController::class, 'recent'])->name('stamps.recent');
         Route::get('stamps', [StampController::class, 'index'])->name('stamps.index');
         Route::delete('stamps/{stamp}', [StampController::class, 'destroy'])->name('stamps.destroy');
+
+        // WhatsApp Cloud API: enviar mensajes, historial y plantillas aprobadas.
+        Route::get('whatsapp/messages', [BusinessWhatsAppController::class, 'index'])->name('whatsapp.messages.index');
+        Route::post('whatsapp/messages', [BusinessWhatsAppController::class, 'send'])->name('whatsapp.messages.store');
+        Route::get('whatsapp/templates', [BusinessWhatsAppController::class, 'templates'])->name('whatsapp.templates.index');
 
         // Clientes del negocio (tarjetas emitidas)
         Route::get('customers', [CustomerCardController::class, 'indexForBusiness'])->name('customers.index');
