@@ -79,7 +79,7 @@ class BusinessController extends Controller
 
         $business->refresh()->load([
             'products.images',
-            'products.menuCategory',
+            //'products.menuCategory',
             'owner',
             'loyaltyCards',
             'categories.category',
@@ -151,9 +151,9 @@ class BusinessController extends Controller
         $categoryIds = array_values(array_map('intval', $categoryIds));
         $business->categories()->delete();
 
-        $mappedMenuCategories = $business->menuCategories()->whereNotNull('source_category_id');
+        $mappedMenuCategories = $business->categories()->whereNotNull('category_id');
         if ($categoryIds !== []) {
-            $mappedMenuCategories->whereNotIn('source_category_id', $categoryIds);
+            $mappedMenuCategories->whereNotIn('category_id', $categoryIds);
         }
         $mappedMenuCategories->update(['is_active' => false]);
 
@@ -164,24 +164,24 @@ class BusinessController extends Controller
                 'sort_order' => $position,
             ]);
 
-            $menuCategory = $business->menuCategories()
-                ->where('source_category_id', $categoryId)
+            $menuCategory = $business->categories()
+                ->where('category_id', $categoryId)
                 ->first();
 
             if ($menuCategory === null) {
-                $menuCategory = $business->menuCategories()
-                    ->whereNull('source_category_id')
+                $menuCategory = $business->categories()
+                    ->whereNull('category_id')
                     ->where('name', $category->name)
                     ->first();
             }
 
             if ($menuCategory === null) {
-                $menuCategory = new MenuCategory;
+                $menuCategory = new Category;
                 $menuCategory->business_id = $business->getKey();
             }
 
             $menuCategory->fill([
-                'source_category_id' => $categoryId,
+                'category_id' => $categoryId,
                 'name' => $category->name,
                 'sort_order' => $position,
                 'is_active' => true,
@@ -205,8 +205,8 @@ class BusinessController extends Controller
                 ]);
             }
 
-            $menuCategoryId = $business->menuCategories()
-                ->where('source_category_id', $data['category_id'])
+            $menuCategoryId = $business->categories()
+                ->where('category_id', $data['category_id'])
                 ->value('id');
             if ($menuCategoryId === null) {
                 throw ValidationException::withMessages([
@@ -252,7 +252,7 @@ class BusinessController extends Controller
 
             $attributes = [
                 'category_id' => $data['category_id'],
-                'menu_category_id' => $menuCategoryId,
+                //'menu_category_id' => $menuCategoryId,
                 'name' => $data['name'],
                 'description' => $data['description'] ?? null,
                 'price' => $data['price'] ?? null,
