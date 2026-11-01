@@ -44,11 +44,17 @@ trait CreatesOAuthClients
      * Autentica la petición con el token del usuario y el scope de su rol
      * (equivalente a `Passport::actingAs()` pero con el scope correcto).
      *
+     * Devuelve el test case para poder encadenar `getJson()`, `postJson()`,
+     * `putJson()`, etc. (`Passport::actingAs()` devuelve el usuario, no el
+     * test case, así que encadenar directamente sobre su resultado fallaría).
+     *
      * @param  array<int, string>|null  $scopes
      */
-    protected function actingAsApi(User $user, ?array $scopes = null): User
+    protected function actingAsApi(User $user, ?array $scopes = null): static
     {
-        return Passport::actingAs($user, $scopes ?? [$user->role->scope()]);
+        Passport::actingAs($user, $scopes ?? [$user->role->scope()]);
+
+        return $this;
     }
 
     /**
