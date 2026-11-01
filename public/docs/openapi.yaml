@@ -42,6 +42,8 @@ tags:
     description: Área del negocio (middleware de rol `role:business,admin`)
   - name: Público
     description: Endpoints sin autenticación
+  - name: Webhooks
+    description: Webhooks de terceros (Meta) sin token OAuth2
 
 paths:
   /:
@@ -1580,6 +1582,190 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
+  /api/business/whatsapp/messages:
+    get:
+      tags: [Negocio]
+      summary: Historial de WhatsApp del negocio
+      description: |
+        Envíos propios, mensajes entrantes de los clientes y acuses de entrega/lectura.
+        Un `admin` ve el historial global y puede filtrar por `business_id`.
+      security: [{ OAuth2: [] }]
+      parameters:
+        - { name: direction, in: query, schema: { type: string, enum: [outgoing, incoming] } }
+        - { name: status, in: query, schema: { type: string, enum: [queued, sent, delivered, read, received, failed] } }
+        - { name: search, in: query, description: Texto, teléfono o nombre de plantilla, schema: { type: string } }
+        - { name: business_id, in: query, description: Sólo para `admin`, schema: { type: string, format: uuid } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Mensajes paginados
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/WhatsAppMessage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '404': { $ref: '#/components/responses/NotFound' }
+    post:
+      tags: [Negocio]
+      summary: Enviar un mensaje de WhatsApp
+      description: |
+        - `type: text` → texto libre, sólo válido dentro de la ventana de 24 h desde el último
+          mensaje del cliente.
+        - `type: template` → plantilla aprobada; obligatoria para iniciar conversación o pasadas
+          24 h.
+
+        El teléfono se normaliza a E.164 (`WHATSAPP_DEFAULT_COUNTRY_CODE` completa los números de
+        10 dígitos). Si Meta rechaza el envío: `502 whatsapp_error` con `code`/`subcode`; si faltan
+        credenciales: `503 whatsapp_not_configured` con `missing`.
+      security: [{ OAuth2: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [to, type]
+              properties:
+                to: { type: string, example: '+5215512345678' }
+                type: { type: string, enum: [text, template] }
+                body: { type: string, maxLength: 4096, description: Obligatorio con `type=text` }
+                preview_url: { type: boolean, default: false }
+                template_name: { type: string, example: promo_sellos, description: Obligatorio con `type=template` }
+                template_language: { type: string, example: es_MX }
+                components:
+                  type: array
+                  description: Parámetros de la plantilla en el formato de la Cloud API
+                  items: { type: object, additionalProperties: true }
+                  example:
+                    - type: body
+                      parameters:
+                        - type: text
+                          text: Ana
+      responses:
+        '201':
+          description: Mensaje aceptado por Meta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: '#/components/schemas/WhatsAppMessage' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '502':
+          description: Meta rechazó el envío
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  error: { type: string, example: whatsapp_error }
+                  code: { type: integer, example: 131030 }
+                  subcode: { type: integer, nullable: true, example: 2494073 }
+                  type: { type: string, example: OAuthException }
+        '503':
+          description: Integración apagada o sin credenciales
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message: { type: string }
+                  error: { type: string, enum: [whatsapp_disabled, whatsapp_not_configured] }
+                  missing:
+                    type: array
+                    items: { type: string }
+
+  /api/business/whatsapp/templates:
+    get:
+      tags: [Negocio]
+      summary: Plantillas de WhatsApp de la cuenta
+      description: |
+        Plantillas de la WABA con su estado de aprobación (`APPROVED`, `PENDING`, `REJECTED`).
+        Es lo que se puede enviar con `type: template`.
+      security: [{ OAuth2: [] }]
+      responses:
+        '200':
+          description: Plantillas de la cuenta
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/WhatsAppTemplate' }
+        '502': { description: Error de Meta }
+        '503':
+          description: Integración apagada o sin credenciales
+
+  /api/webhooks/whatsapp:
+    get:
+      tags: [Webhooks]
+      summary: Handshake del webhook de WhatsApp (Meta)
+      description: |
+        Meta llama a esta URL al guardar el webhook. Si `hub.mode=subscribe` y
+        `hub.verify_token` coincide con `WHATSAPP_WEBHOOK_VERIFY_TOKEN`, se responde
+        `hub.challenge` en texto plano.
+      security: []
+      parameters:
+        - { name: hub.mode, in: query, required: true, schema: { type: string, enum: [subscribe] } }
+        - { name: hub.verify_token, in: query, required: true, schema: { type: string } }
+        - { name: hub.challenge, in: query, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: Challenge devuelto en texto plano
+          content:
+            text/plain:
+              schema: { type: string }
+        '403':
+          description: Modo o token de verificación incorrectos
+    post:
+      tags: [Webhooks]
+      summary: Eventos del webhook de WhatsApp (mensajes entrantes y acuses)
+      description: |
+        Requiere la cabecera `X-Hub-Signature-256` calculada con `WHATSAPP_APP_SECRET`
+        (HMAC-SHA256 del cuerpo en crudo). Guarda los mensajes entrantes y actualiza el estado de
+        los envíos (`sent` → `delivered` → `read`, o `failed` con el error de Meta).
+
+        Siempre responde `200` cuando el payload es válido: Meta reintenta ante cualquier otro
+        código.
+      security: []
+      parameters:
+        - { name: X-Hub-Signature-256, in: header, required: true, schema: { type: string, example: 'sha256=abc...' } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: true
+              description: Payload estándar de WhatsApp Business (entry[].changes[].value)
+      responses:
+        '200':
+          description: Evento procesado
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  received: { type: boolean }
+                  messages: { type: integer, description: Mensajes entrantes nuevos }
+                  statuses: { type: integer, description: Acuses aplicados }
+        '400': { description: Cuerpo no es JSON válido }
+        '403':
+          description: Firma inválida
+        '503':
+          description: Falta `WHATSAPP_APP_SECRET`
+
 components:
   securitySchemes:
     OAuth2:
@@ -2010,6 +2196,42 @@ components:
         business: { nullable: true, allOf: [{ $ref: '#/components/schemas/ClientBusiness' }] }
         loyalty_card: { nullable: true, allOf: [{ $ref: '#/components/schemas/LoyaltyCard' }] }
         created_at: { type: string, format: date-time }
+
+    WhatsAppMessage:
+      type: object
+      description: Envío, mensaje entrante o acuse de WhatsApp.
+      properties:
+        id: { type: string, format: uuid }
+        direction: { type: string, enum: [outgoing, incoming] }
+        direction_label: { type: string }
+        status: { type: string, enum: [queued, sent, delivered, read, received, failed] }
+        status_label: { type: string }
+        wa_message_id: { type: string, nullable: true, example: wamid.HBgNNTIx... }
+        business_id: { type: string, format: uuid, nullable: true }
+        from_phone: { type: string, nullable: true, example: '+5215598765432' }
+        to_phone: { type: string, nullable: true, example: '+5215512345678' }
+        type: { type: string, enum: [text, template, image, document, audio, video, sticker, location, contacts, reaction, unknown] }
+        template_name: { type: string, nullable: true }
+        template_language: { type: string, nullable: true }
+        body: { type: string, nullable: true }
+        error: { type: string, nullable: true }
+        error_code: { type: string, nullable: true, example: '131030' }
+        sent_at: { type: string, format: date-time, nullable: true }
+        delivered_at: { type: string, format: date-time, nullable: true }
+        read_at: { type: string, format: date-time, nullable: true }
+        created_at: { type: string, format: date-time }
+
+    WhatsAppTemplate:
+      type: object
+      properties:
+        id: { type: string, example: '111222333' }
+        name: { type: string, example: promo_sellos }
+        status: { type: string, enum: [APPROVED, PENDING, REJECTED, PAUSED, DISABLED] }
+        category: { type: string, enum: [MARKETING, UTILITY, AUTHENTICATION] }
+        language: { type: string, example: es_MX }
+        components:
+          type: array
+          items: { type: object, additionalProperties: true }
 
     Redemption:
       type: object
