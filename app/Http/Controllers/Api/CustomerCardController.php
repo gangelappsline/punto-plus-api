@@ -15,12 +15,10 @@ use App\Services\QrCodeService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Laravel\Passport\Attributes\AuthorizeToken;
 
 /**
  * Tarjetas del cliente: alta por QR, progreso, historial de sellos y QR propio.
  */
-#[AuthorizeToken(['cliente', 'negocio', 'admin'], anyScope: true)]
 class CustomerCardController extends Controller
 {
     public function __construct(

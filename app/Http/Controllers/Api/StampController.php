@@ -11,12 +11,10 @@ use App\Services\StampService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Laravel\Passport\Attributes\AuthorizeToken;
 
 /**
  * Sellos: el negocio escanea el QR del cliente para registrar una compra.
  */
-#[AuthorizeToken(['negocio', 'admin'], anyScope: true)]
 class StampController extends Controller
 {
     public function __construct(
