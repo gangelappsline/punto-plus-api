@@ -229,7 +229,9 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `GET` | `/api/customer/redemptions` | Mis canjes (`?status=pending`) |
 | `GET` | `/api/customer/redemptions/{redemption}` | Detalle del canje (incluye el código) |
 | `POST` | `/api/customer/redemptions/{redemption}/cancel` | Cancelar un canje pendiente |
-| `GET` | `/api/customer/promotions` | Promociones de los negocios donde tengo tarjeta |
+| `GET` | `/api/client/promotions` | Promociones vigentes de los negocios donde tengo **o he tenido** tarjeta (`?business_id=`, `?search=`, `?discount_type=`) |
+| `GET` | `/api/client/near-me` | Negocios a menos de 10 km de `?latitude=..&longitude=..` (radio ajustable con `?radius=`), ordenados por distancia |
+| `GET` | `/api/customer/promotions` | Alias histórico de `/api/client/promotions` (misma acción) |
 
 ### Negocio (middleware de rol `role:business,admin`)
 

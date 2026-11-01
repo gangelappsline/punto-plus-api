@@ -648,10 +648,84 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
+  /api/client/promotions:
+    get:
+      tags: [Cliente]
+      summary: Promociones de los negocios donde tengo o he tenido tarjeta
+      description: |
+        Promociones **vigentes** (`is_active` y dentro de su ventana de fechas) de todos los
+        negocios con los que el cliente tiene o ha tenido tarjeta. Las tarjetas de las que se
+        dio de baja cuentan: la baja es un borrado lógico, así que el histórico sigue dando acceso
+        a las promociones del negocio.
+      security: [{ OAuth2: [] }]
+      parameters:
+        - { name: business_id, in: query, description: Limita el listado a un negocio, schema: { type: string, format: uuid } }
+        - { name: search, in: query, description: Busca en título y descripción, schema: { type: string } }
+        - { name: discount_type, in: query, description: Tipo de descuento, schema: { type: string, enum: [percentage, fixed_amount, free_item, gift] } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Promociones paginadas, las más recientes primero
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ClientPromotion' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/client/near-me:
+    get:
+      tags: [Cliente]
+      summary: Negocios a menos de 10 km de mi ubicación
+      description: |
+        Negocios activos con coordenadas dentro del radio indicado (10 km por defecto),
+        ordenados de más cerca a más lejos. El servidor filtra primero por una caja
+        delimitadora en SQL y calcula la distancia exacta (Haversine) para recortar y ordenar.
+
+        `distance_km` viene redondeado a dos decimales y `has_card` indica si el cliente
+        ya tiene tarjeta (o la ha tenido) en ese negocio.
+      security: [{ OAuth2: [] }]
+      parameters:
+        - { name: latitude, in: query, required: true, description: Latitud del cliente, schema: { type: number, format: double, minimum: -90, maximum: 90 }, example: 19.4326 }
+        - { name: longitude, in: query, required: true, description: Longitud del cliente, schema: { type: number, format: double, minimum: -180, maximum: 180 }, example: -99.1332 }
+        - { name: radius, in: query, description: Radio de búsqueda en kilómetros, schema: { type: number, format: double, default: 10, minimum: 0.1, maximum: 100 } }
+        - { name: search, in: query, description: Busca en nombre, descripción y categoría, schema: { type: string } }
+        - { name: category, in: query, description: Categoría exacta del negocio, schema: { type: string } }
+        - $ref: '#/components/parameters/PerPage'
+        - $ref: '#/components/parameters/Page'
+      responses:
+        '200':
+          description: Negocios cercanos junto al centro y radio aplicados
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: '#/components/schemas/Paginated'
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items: { $ref: '#/components/schemas/ClientBusiness' }
+                      center:
+                        type: object
+                        properties:
+                          latitude: { type: number, example: 19.4326 }
+                          longitude: { type: number, example: -99.1332 }
+                          radius_km: { type: number, example: 10 }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
   /api/customer/promotions:
     get:
       tags: [Cliente]
-      summary: Promociones de los negocios donde tengo tarjeta
+      summary: 'Alias histórico de `/api/client/promotions`'
+      description: Se mantiene por compatibilidad; ejecuta la misma acción con la misma semántica.
+      deprecated: true
       security: [{ OAuth2: [] }]
       parameters:
         - { name: business_id, in: query, schema: { type: string, format: uuid } }
@@ -669,7 +743,7 @@ paths:
                     properties:
                       data:
                         type: array
-                        items: { $ref: '#/components/schemas/Promotion' }
+                        items: { $ref: '#/components/schemas/ClientPromotion' }
 
   /api/business/profile:
     get:
@@ -1866,6 +1940,75 @@ components:
         max_redemptions: { type: integer, nullable: true }
         redemptions_count: { type: integer }
         business: { nullable: true, allOf: [{ $ref: '#/components/schemas/Business' }] }
+        created_at: { type: string, format: date-time }
+
+    BusinessCategory:
+      type: object
+      description: Categoría asociada al negocio.
+      properties:
+        id: { type: string, format: uuid }
+        category_id: { type: integer }
+        name: { type: string, example: cafetería }
+        icon: { type: string }
+        sort_order: { type: integer, nullable: true }
+
+    ClientBusiness:
+      type: object
+      description: |
+        Resumen de negocio tal como lo consume la app del cliente (sin menú ni tarjetas
+        anidadas). Los contadores y la distancia sólo aparecen cuando el endpoint los calcula.
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Café Aurora }
+        slug: { type: string, example: cafe-aurora }
+        description: { type: string, nullable: true }
+        category: { type: string, nullable: true }
+        logo_url: { type: string, nullable: true }
+        background_url: { type: string, nullable: true }
+        stamp_icon_url: { type: string, nullable: true }
+        card_settings: { type: object, additionalProperties: true }
+        phone: { type: string, nullable: true }
+        phone_numbers: { type: array, items: { type: string } }
+        email: { type: string, nullable: true }
+        website: { type: string, nullable: true }
+        address: { type: string, nullable: true }
+        city: { type: string, nullable: true }
+        country: { type: string, nullable: true, example: ES }
+        latitude: { type: number, nullable: true }
+        longitude: { type: number, nullable: true }
+        categories:
+          type: array
+          items: { $ref: '#/components/schemas/BusinessCategory' }
+        loyalty_cards_count: { type: integer, nullable: true }
+        active_loyalty_cards_count: { type: integer, nullable: true }
+        active_promotions_count: { type: integer, nullable: true }
+        distance_km: { type: number, nullable: true, description: 'Distancia al punto enviado (sólo en búsquedas por cercanía)' }
+        has_card: { type: boolean, nullable: true, description: 'El cliente tiene o ha tenido tarjeta en este negocio' }
+        is_active: { type: boolean }
+
+    ClientPromotion:
+      type: object
+      description: Promoción vista desde la app del cliente, con el negocio que la publica.
+      properties:
+        id: { type: string, format: uuid }
+        business_id: { type: string, format: uuid }
+        loyalty_card_id: { type: string, format: uuid, nullable: true }
+        title: { type: string, example: 2x1 en cafés los martes }
+        description: { type: string, nullable: true }
+        image_url: { type: string, nullable: true }
+        terms: { type: string, nullable: true }
+        discount_type: { type: string, enum: [percentage, fixed_amount, free_item, gift] }
+        discount_type_label: { type: string }
+        discount_value: { type: number, nullable: true }
+        code: { type: string, nullable: true }
+        starts_at: { type: string, format: date-time, nullable: true }
+        ends_at: { type: string, format: date-time, nullable: true }
+        is_active: { type: boolean }
+        is_active_now: { type: boolean }
+        max_redemptions: { type: integer, nullable: true }
+        redemptions_count: { type: integer }
+        business: { nullable: true, allOf: [{ $ref: '#/components/schemas/ClientBusiness' }] }
+        loyalty_card: { nullable: true, allOf: [{ $ref: '#/components/schemas/LoyaltyCard' }] }
         created_at: { type: string, format: date-time }
 
     Redemption:
