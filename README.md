@@ -161,8 +161,9 @@ además el middleware `role:business,admin`.
 | `users` | id | Clientes, negocios y admins (`role`) | — |
 | `categories` | id | Catálogo global (`name`, `icon`) administrado por el equipo Punto Plus | — |
 | `businesses` | **uuid** | Negocio, branding (`logo_path`, `background_path`, `stamp_icon_path`) y `card_settings` (JSON) | `user_id` → null on delete |
-| `menu_categories` | id | Categorías del menú, propiedad de un negocio | `business_id` → cascade |
-| `products` | **uuid** | Productos de una categoría de menú, precio base y disponibilidad | `business_id`/`menu_category_id` → cascade |
+| `business_categories` | id | Categorías globales asociadas al negocio (`business_id`, `category_id`, orden) | `business_id`/`category_id` → cascade |
+| `products` | **uuid** | Productos asociados al negocio y a una categoría global, precio base y disponibilidad | `business_id`/`category_id` → cascade |
+| `menu_categories` | id | Tabla histórica; los endpoints actuales ya no la usan | legado |
 | `product_presentations` | **uuid** | Presentaciones del producto con precio opcional que puede heredar el precio base | `product_id` → cascade |
 | `product_images` | id | De 1 a 5 imágenes públicas ordenadas por producto | `product_id` → cascade |
 | `loyalty_cards` | **uuid** | Tarjeta de sellos del negocio (`required_stamps`, `join_code`, colores, assets) | `business_id` → **cascade** |
@@ -231,6 +232,8 @@ los errores devuelven `message` y un campo `error` con código estable.
 
 ### Negocio (scope OAuth `negocio`, middleware de rol `role:business,admin`)
 
+En `PUT /api/business/card`, el paso `information` acepta `logo_url` y `background_url` como imágenes base64/data URI o URLs existentes; una URL se conserva sin procesarla otra vez. `phone_numbers` acepta una lista o teléfonos separados por comas y se normaliza a una lista en la respuesta.
+
 | Método | Ruta | Descripción |
 |---|---|---|
 | `GET` | `/api/business/profile` | Mi negocio |
@@ -242,9 +245,9 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `GET` | `/api/business/qr/download/{format}` | Descargar el QR en `png` o `webp` |
 | `POST` | `/api/business/assets` | Subir asset (`type`: `logo`, `background`, `stamp_icon`) |
 | `DELETE` | `/api/business/assets/{type}` | Eliminar asset |
-| `GET` / `POST` | `/api/business/menu/categories` | Listar/crear categorías del menú |
-| `GET` / `PUT` / `PATCH` / `DELETE` | `/api/business/menu/categories/{menuCategory}` | Consultar/editar/eliminar categoría del menú |
-| `GET` / `POST` | `/api/business/menu/categories/{menuCategory}/products` | Listar/crear productos con entre 1 y 5 fotos base64 |
+| `GET` / `POST` | `/api/business/menu/categories` | Listar/asociar categorías globales existentes al negocio (`category_id`) |
+| `GET` / `PUT` / `PATCH` / `DELETE` | `/api/business/menu/categories/{businessCategory}` | Consultar/editar/eliminar la asociación categoría-negocio |
+| `GET` / `POST` | `/api/business/menu/categories/{businessCategory}/products` | Listar/crear productos de esa categoría con entre 1 y 5 fotos base64 |
 | `GET` / `PUT` / `PATCH` / `DELETE` | `/api/business/menu/products/{product}` | Consultar/editar/eliminar producto; `images` reemplaza todas las fotos si se envía |
 | `GET` / `POST` | `/api/business/menu/products/{product}/presentations` | Listar/crear presentaciones y sus precios opcionales |
 | `GET` / `PUT` / `PATCH` / `DELETE` | `/api/business/menu/products/{product}/presentations/{presentation}` | Consultar/editar/eliminar presentación |

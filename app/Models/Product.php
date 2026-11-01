@@ -9,7 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 
-#[Fillable(['business_id', 'category_id', 'menu_category_id', 'name', 'description', 'price', 'sort_order', 'is_available'])]
+#[Fillable(['business_id', 'category_id', 'name', 'description', 'price', 'sort_order', 'is_available'])]
 class Product extends Model
 {
     use HasUuids;
@@ -31,11 +31,6 @@ class Product extends Model
     public function category(): BelongsTo
     {
         return $this->belongsTo(Category::class);
-    }
-
-    public function menuCategory(): BelongsTo
-    {
-        return $this->belongsTo(MenuCategory::class);
     }
 
     public function presentations(): HasMany
