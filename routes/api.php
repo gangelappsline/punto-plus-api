@@ -45,6 +45,9 @@ Route::middleware(['auth:api'])->group(function () {
 });
 Route::prefix('admin')->name('admin.')->middleware(['auth:api', 'role:admin'])->group(function (): void {
     Route::apiResource('business', AdminBusinessController::class);
+    Route::post('business/{business}/restore', [AdminBusinessController::class, 'restore'])
+        ->name('business.restore')
+        ->withTrashed();
     Route::apiResource('categories', AdminCategoryController::class);
 });
 // ---------------------------------------------------------------------------

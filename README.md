@@ -296,11 +296,20 @@ Las fotos se envían en `images` como data URIs o cadenas base64 de JPEG, PNG o 
 
 | Método | Ruta | Descripción |
 |---|---|---|
+| `GET` | `/api/admin/business` | Listado paginado de negocios + estadísticas globales (`?search=`, `?is_active=`, `?category=`, `?category_id=`, `?city=`, `?trashed=` con `with` u `only`, `?sort=`, `?direction=`, `?per_page=`) |
+| `POST` | `/api/admin/business` | Crear negocio. El propietario se indica con `user_id` (usuario con rol `business` sin negocio) o con `owner{name,email,password,phone?,is_active?}`; admite `category_ids[]`, `card_settings{}` e imágenes base64 en `logo_url`/`background_url`/`stamp_icon_url` |
+| `GET` | `/api/admin/business/{business}` | Detalle del negocio + métricas del negocio en `stats` |
+| `PUT` / `PATCH` | `/api/admin/business/{business}` | Actualizar datos, propietario (`user_id`), categorías, `card_settings` e imágenes (`null` las elimina). Si cambia `name` sin enviar `slug`, se regenera el slug |
+| `DELETE` | `/api/admin/business/{business}` | Baja lógica del negocio (se conserva el histórico; el alta por QR deja de funcionar) |
+| `POST` | `/api/admin/business/{business}/restore` | Restaurar un negocio eliminado |
 | `GET` | `/api/admin/categories` | Listar categorías (`?search=`, `?per_page=`) |
 | `POST` | `/api/admin/categories` | Crear categoría (`name`, `icon` opcional como cadena base64 o data URI de imagen) |
 | `GET` | `/api/admin/categories/{category}` | Consultar una categoría |
 | `PUT` / `PATCH` | `/api/admin/categories/{category}` | Actualizar nombre o icono (`icon: null` lo elimina) |
 | `DELETE` | `/api/admin/categories/{category}` | Eliminar categoría y su imagen subida |
+
+`GET /api/admin/business` responde `{ "stats": { ... }, "businesses": { "data": [...], "links": ..., "meta": ... } }`.
+`stats` agrupa los totales de la plataforma: `businesses` (total, activos, inactivos, sin tarjetas, altas de los últimos 30 días/mes y eliminados), `owners` (usuarios de negocio con y sin negocio), `loyalty_cards`, `customers` (activos, completados, altas recientes), `stamps` (hoy y últimos 30 días), `redemptions` (pendientes/completados/rechazados/cancelados), `promotions`, `rewards`, productos, `averages` (promedios por negocio), `growth` (altas por mes de los últimos 6 meses) y `top_businesses` (ranking por clientes). El detalle (`GET /api/admin/business/{business}`) devuelve además `stats` con las métricas propias del negocio (clientes, sellos, recompensas y canjes).
 
 ### Público
 
