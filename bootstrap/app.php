@@ -10,7 +10,6 @@ use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Validation\ValidationException;
-use Laravel\Passport\Exceptions\MissingScopeException;
 use Illuminate\Auth\Access\AuthorizationException;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Symfony\Component\HttpKernel\Exception\HttpException;
@@ -51,22 +50,11 @@ return Application::configure(basePath: dirname(__DIR__))
             }
         });
 
+        // La autorización la resuelven el middleware de rol y las Policies: los
+        // scopes del token son informativos y no restringen el acceso.
         $exceptions->render(function (AccessDeniedHttpException|AuthorizationException $e, Request $request) {
             if (! $request->is('api/*')) {
                 return null;
-            }
-
-            // Passport lanza MissingScopeException (que extiende AuthorizationException):
-            // el handler la convierte en AccessDeniedHttpException y conserva la original
-            // en getPrevious(), de ahí que el scope se compruebe aquí.
-            $missingScope = $e->getPrevious();
-
-            if ($missingScope instanceof MissingScopeException) {
-                return response()->json([
-                    'message' => 'El token no tiene los scopes necesarios para este recurso.',
-                    'error' => 'missing_scope',
-                    'required_scopes' => $missingScope->scopes(),
-                ], 403);
             }
 
             return response()->json([

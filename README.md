@@ -74,7 +74,8 @@ Documentación de la API en [`public/docs/openapi.yaml`](public/docs/openapi.yam
 
 ## 3. Autenticación OAuth2
 
-Todos los tokens los emite Passport 13. Los scopes son **`cliente`**, **`negocio`** y **`admin`**.
+Todos los tokens los emite Passport 13. Los scopes son **`cliente`**, **`negocio`** y **`admin`**, pero son
+**informativos**: no restringen el acceso. La autorización la resuelven el middleware de rol y las Policies.
 
 ### 3.1 App móvil de clientes — Authorization Code + PKCE
 
@@ -150,9 +151,9 @@ curl -X POST http://localhost:8000/api/auth/logout-all -H 'Authorization: Bearer
 | `negocio` | Panel del negocio | Perfil, tarjetas, recompensas, promociones, escaneos y canjes |
 | `admin` | Equipo Punto Plus | Acceso global (soporte y moderación) |
 
-El scope acompaña al rol, pero **la autorización fina la hacen las Policies**: un token `cliente`
-nunca puede leer tarjetas de otro cliente ni datos de un negocio. Las rutas de negocio exigen
-además el middleware `role:business,admin`.
+El scope del token sólo describe para qué se emitió: **no se valida en ninguna ruta**. La autorización
+la hacen el middleware de rol (`role:business,admin`, `role:admin`) y las Policies: un token `cliente`
+nunca puede leer tarjetas de otro cliente ni datos de un negocio.
 
 ## 4. Modelo de datos
 
@@ -213,7 +214,7 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `PUT` | `/api/user` | Actualiza nombre, email, teléfono |
 | `PUT` | `/api/user/password` | Cambia la contraseña y cierra las demás sesiones |
 
-### Cliente (scope `cliente`)
+### Cliente (cualquier token autenticado)
 
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -228,9 +229,11 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `GET` | `/api/customer/redemptions` | Mis canjes (`?status=pending`) |
 | `GET` | `/api/customer/redemptions/{redemption}` | Detalle del canje (incluye el código) |
 | `POST` | `/api/customer/redemptions/{redemption}/cancel` | Cancelar un canje pendiente |
-| `GET` | `/api/customer/promotions` | Promociones de los negocios donde tengo tarjeta |
+| `GET` | `/api/client/promotions` | Promociones vigentes de los negocios donde tengo **o he tenido** tarjeta (`?business_id=`, `?search=`, `?discount_type=`) |
+| `GET` | `/api/client/near-me` | Negocios a menos de 10 km de `?latitude=..&longitude=..` (radio ajustable con `?radius=`), ordenados por distancia |
+| `GET` | `/api/customer/promotions` | Alias histórico de `/api/client/promotions` (misma acción) |
 
-### Negocio (scope OAuth `negocio`, middleware de rol `role:business,admin`)
+### Negocio (middleware de rol `role:business,admin`)
 
 En `PUT /api/business/card`, el paso `information` acepta `logo_url` y `background_url` como imágenes base64/data URI o URLs existentes; una URL se conserva sin procesarla otra vez. `phone_numbers` acepta una lista o teléfonos separados por comas y se normaliza a una lista en la respuesta.
 
@@ -292,7 +295,7 @@ El cuerpo se envía como `{ "step": "...", "data": { ... } }`:
 
 Las fotos se envían en `images` como data URIs o cadenas base64 de JPEG, PNG o WEBP; se requieren de 1 a 5. Cada presentación tiene un `price` opcional: si es `null`, hereda el precio base del producto. Los iconos de fotos en respuestas son URLs públicas.
 
-### Administrador (auth:api + middleware `role:admin`; las rutas de categorías no requieren scope OAuth)
+### Administrador (auth:api + middleware `role:admin`)
 
 | Método | Ruta | Descripción |
 |---|---|---|
@@ -423,7 +426,6 @@ Ejemplo de actualización parcial:
 | 401 | `invalid_credentials` | Email/contraseña incorrectos |
 | 401 | `invalid_refresh_token` | Refresh token caducado o revocado |
 | 403 | `account_disabled` | Cuenta desactivada |
-| 403 | `missing_scope` (+ `required_scopes`) | El token no tiene el scope necesario |
 | 403 | `forbidden` | La Policy deniega el acceso (otro cliente/negocio) |
 | 404 | `not_found` | Recurso inexistente (mensaje en español) |
 | 422 | `validation_error` (+ `errors`) | Validación de FormRequest |

@@ -12,12 +12,10 @@ use App\Models\Reward;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Laravel\Passport\Attributes\AuthorizeToken;
 
 /**
  * Recompensas asociadas a cada tarjeta de fidelidad.
  */
-#[AuthorizeToken(['negocio', 'admin'], anyScope: true)]
 class RewardController extends Controller
 {
     /**

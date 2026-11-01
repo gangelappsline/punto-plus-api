@@ -8,6 +8,8 @@ use App\Http\Controllers\Api\BusinessQrController;
 use App\Http\Controllers\Api\CustomerCardController;
 use App\Http\Controllers\Api\LoyaltyCardController;
 use App\Http\Controllers\Api\BusinessCategoryController;
+use App\Http\Controllers\Api\Client\NearMeController as ClientNearMeController;
+use App\Http\Controllers\Api\Client\PromotionController as ClientPromotionController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ProductPresentationController;
 use App\Http\Controllers\Api\PromotionController;
@@ -99,8 +101,21 @@ Route::middleware('auth:api')->group(function (): void {
         Route::get('redemptions/{redemption}', [RedemptionController::class, 'show'])->name('redemptions.show');
         Route::post('redemptions/{redemption}/cancel', [RedemptionController::class, 'cancel'])->name('redemptions.cancel');
 
-        // Promociones activas de los negocios en los que el cliente tiene tarjeta.
-        Route::get('promotions', [PromotionController::class, 'forCustomer'])->name('promotions.index');
+        // Alias histórico de `/api/client/promotions` (misma acción y semántica).
+        Route::get('promotions', [ClientPromotionController::class, 'index'])->name('promotions.index');
+    });
+
+    /*
+    |--------------------------------------------------------------------------
+    | Área cliente (app móvil)
+    |--------------------------------------------------------------------------
+    */
+    Route::prefix('client')->name('client.')->group(function (): void {
+        // Promociones de los negocios con los que tengo o he tenido tarjeta.
+        Route::get('promotions', [ClientPromotionController::class, 'index'])->name('promotions.index');
+
+        // Negocios a menos de 10 km de la ubicación enviada (`latitude`/`longitude`).
+        Route::get('near-me', [ClientNearMeController::class, 'index'])->name('near-me.index');
     });
 
     /*

@@ -14,7 +14,6 @@ use App\Services\RedemptionService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
-use Laravel\Passport\Attributes\AuthorizeToken;
 
 /**
  * Canjes: el cliente solicita la recompensa y el negocio valida el código.
@@ -34,7 +33,6 @@ class RedemptionController extends Controller
     /**
      * POST /api/customer/cards/{customerCard}/redeem
      */
-    #[AuthorizeToken(['cliente', 'negocio', 'admin'], anyScope: true)]
     public function store(StoreRedemptionRequest $request, CustomerCard $customerCard): JsonResponse
     {
         /** @var \App\Models\User $customer */
@@ -60,7 +58,6 @@ class RedemptionController extends Controller
     /**
      * GET /api/customer/redemptions
      */
-    #[AuthorizeToken(['cliente', 'negocio', 'admin'], anyScope: true)]
     public function index(Request $request): AnonymousResourceCollection
     {
         $filters = $request->validate([
@@ -82,7 +79,6 @@ class RedemptionController extends Controller
     /**
      * GET /api/customer/redemptions/{redemption}
      */
-    #[AuthorizeToken(['cliente', 'negocio', 'admin'], anyScope: true)]
     public function show(Redemption $redemption): RedemptionResource
     {
         $this->authorize('view', $redemption);
@@ -93,7 +89,6 @@ class RedemptionController extends Controller
     /**
      * POST /api/customer/redemptions/{redemption}/cancel
      */
-    #[AuthorizeToken(['cliente', 'negocio', 'admin'], anyScope: true)]
     public function cancel(Redemption $redemption): JsonResponse
     {
         $this->authorize('cancel', $redemption);
@@ -115,7 +110,6 @@ class RedemptionController extends Controller
     /**
      * GET /api/business/redemptions
      */
-    #[AuthorizeToken(['negocio', 'admin'], anyScope: true)]
     public function businessIndex(Request $request): AnonymousResourceCollection
     {
         $business = $this->businessOrFail($request);
@@ -143,7 +137,6 @@ class RedemptionController extends Controller
     /**
      * POST /api/business/redemptions/{redemption}/approve
      */
-    #[AuthorizeToken(['negocio', 'admin'], anyScope: true)]
     public function approve(Redemption $redemption): JsonResponse
     {
         $this->authorize('approve', $redemption);
@@ -159,7 +152,6 @@ class RedemptionController extends Controller
     /**
      * POST /api/business/redemptions/{redemption}/reject
      */
-    #[AuthorizeToken(['negocio', 'admin'], anyScope: true)]
     public function reject(RejectRedemptionRequest $request, Redemption $redemption): JsonResponse
     {
         $this->authorize('reject', $redemption);
@@ -179,7 +171,6 @@ class RedemptionController extends Controller
     /**
      * POST /api/business/redemptions/complete — validar por código.
      */
-    #[AuthorizeToken(['negocio', 'admin'], anyScope: true)]
     public function completeByCode(CompleteRedemptionRequest $request): JsonResponse
     {
         $business = $this->businessOrFail($request);

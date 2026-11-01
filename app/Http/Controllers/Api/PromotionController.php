@@ -6,19 +6,16 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Promotion\StorePromotionRequest;
 use App\Http\Requests\Promotion\UpdatePromotionRequest;
 use App\Http\Resources\PromotionResource;
-use App\Models\CustomerCard;
 use App\Models\LoyaltyCard;
 use App\Models\Promotion;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\ValidationException;
-use Laravel\Passport\Attributes\AuthorizeToken;
 
 /**
  * Promociones que el negocio publica para atraer y retener clientes.
  */
-#[AuthorizeToken(['negocio', 'admin'], anyScope: true)]
 class PromotionController extends Controller
 {
     /**
@@ -97,34 +94,6 @@ class PromotionController extends Controller
         $promotion->delete();
 
         return response()->json(['message' => 'Promoción eliminada.']);
-    }
-
-    /**
-     * GET /api/customer/promotions — promociones vigentes de mis negocios.
-     */
-    #[AuthorizeToken(['cliente', 'negocio', 'admin'], anyScope: true)]
-    public function forCustomer(Request $request): AnonymousResourceCollection
-    {
-        $filters = $request->validate([
-            'business_id' => ['nullable', 'uuid'],
-            'per_page' => ['nullable', 'integer', 'min:1', 'max:'.config('punto_plus.per_page.max')],
-        ]);
-
-        $businessIds = CustomerCard::query()
-            ->where('user_id', $request->user()->getAuthIdentifier())
-            ->distinct()
-            ->pluck('business_id');
-
-        $promotions = Promotion::query()
-            ->active()
-            ->whereIn('business_id', $businessIds)
-            ->when(filled($filters['business_id'] ?? null), fn ($query) => $query->where('business_id', $filters['business_id']))
-            ->with(['business', 'loyaltyCard'])
-            ->orderByDesc('starts_at')
-            ->paginate($this->perPage($request))
-            ->withQueryString();
-
-        return PromotionResource::collection($promotions);
     }
 
     /**
