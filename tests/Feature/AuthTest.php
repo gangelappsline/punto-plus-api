@@ -140,6 +140,24 @@ class AuthTest extends TestCase
         $this->getJson('/api/business/cards')->assertStatus(401);
     }
 
+    public function test_la_autorizacion_no_depende_de_los_scopes_del_token(): void
+    {
+        $cliente = User::factory()->cliente()->create();
+
+        // Un token sin scopes accede igualmente a su área: la autorización la
+        // resuelven el middleware de rol y las Policies, no el scope.
+        $this->actingAsApi($cliente, [])
+            ->getJson('/api/user')
+            ->assertOk()
+            ->assertJsonPath('data.id', $cliente->getKey());
+
+        // Un 403 por rol responde `forbidden` (ya no existe `missing_scope`).
+        $this->actingAsApi($cliente, [])
+            ->getJson('/api/business/cards')
+            ->assertForbidden()
+            ->assertJsonPath('error', 'forbidden');
+    }
+
     public function test_el_refresh_token_permite_renovar_el_acceso(): void
     {
         $user = User::factory()->cliente()->create([

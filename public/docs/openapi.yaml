@@ -7,14 +7,15 @@ info:
     API REST de **fidelidad digital para pequeñas empresas**: tarjetas de sellos,
     recompensas, promociones y canjes.
 
-    **Autenticación OAuth2 (Laravel Passport 13)** con los scopes `cliente`, `negocio` y `admin`:
+    **Autenticación OAuth2 (Laravel Passport 13)** con los scopes `cliente`, `negocio` y `admin`
+    (informativos: no restringen el acceso; la autorización la resuelven el rol y las Policies):
 
     - `Authorization Code + PKCE` para la app móvil de clientes (`/oauth/authorize` + `/oauth/token`).
     - `Password grant` para apps propias de confianza (`POST /api/auth/login`, `POST /api/auth/register`).
     - `Refresh token` para renovar el acceso (`POST /api/auth/refresh`).
 
     Las respuestas de recurso se envuelven en `data` (+ `meta` y `links` al paginar). Los errores
-    incluyen `message` y un código estable en `error` (`invalid_credentials`, `missing_scope`, ...).
+    incluyen `message` y un código estable en `error` (`invalid_credentials`, `forbidden`, ...).
   contact:
     name: Punto Plus
     email: hola@puntoplus.test
@@ -36,9 +37,9 @@ tags:
   - name: Perfil
     description: Usuario autenticado
   - name: Cliente
-    description: Área del cliente (scope `cliente`)
+    description: Área del cliente
   - name: Negocio
-    description: Área del negocio (scope `negocio`, middleware `role:negocio,admin`)
+    description: Área del negocio (middleware de rol `role:business,admin`)
   - name: Público
     description: Endpoints sin autenticación
 
@@ -262,7 +263,7 @@ paths:
     post:
       tags: [Autenticación]
       summary: Cerrar la sesión actual
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       responses:
         '200':
           description: Token revocado (y su refresh token)
@@ -279,7 +280,7 @@ paths:
     post:
       tags: [Autenticación]
       summary: Cerrar todas las sesiones
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       responses:
         '200':
           description: Todos los tokens del usuario revocados
@@ -296,7 +297,7 @@ paths:
     get:
       tags: [Perfil]
       summary: Perfil del usuario autenticado
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       responses:
         '200':
           description: Datos del usuario
@@ -310,7 +311,7 @@ paths:
     put:
       tags: [Perfil]
       summary: Actualizar el perfil
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -337,7 +338,7 @@ paths:
     put:
       tags: [Perfil]
       summary: Cambiar la contraseña (revoca las demás sesiones)
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -403,7 +404,7 @@ paths:
     get:
       tags: [Cliente]
       summary: Mis tarjetas de fidelidad
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [active, completed, expired, blocked] } }
         - { name: business_id, in: query, schema: { type: string, format: uuid } }
@@ -433,7 +434,7 @@ paths:
         Acepta el `code` del negocio (texto plano, payload JSON del QR, URL con `?code=` o
         deep link) o el `loyalty_card_id`. Es idempotente: si el cliente ya tenía tarjeta,
         devuelve `200` con `already_joined: true` y el progreso intacto.
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -462,7 +463,7 @@ paths:
     get:
       tags: [Cliente]
       summary: Detalle de una de mis tarjetas (con últimos sellos)
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       responses:
         '200':
           description: Tarjeta con sellos y recompensas
@@ -477,7 +478,7 @@ paths:
     delete:
       tags: [Cliente]
       summary: Salir del programa (conserva el progreso)
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       responses:
         '200':
           description: Tarjeta archivada (borrado lógico)
@@ -490,7 +491,7 @@ paths:
     get:
       tags: [Cliente]
       summary: Historial de sellos de una tarjeta
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/CustomerCardId'
         - { name: from, in: query, schema: { type: string, format: date-time } }
@@ -516,7 +517,7 @@ paths:
     get:
       tags: [Cliente]
       summary: Recompensas disponibles y cuáles puedo canjear
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/CustomerCardId'
       responses:
@@ -542,7 +543,7 @@ paths:
     get:
       tags: [Cliente]
       summary: QR que el negocio escanea para sellar
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/CustomerCardId'
       responses:
@@ -560,7 +561,7 @@ paths:
         Descuenta los sellos necesarios y reserva una unidad de stock. Devuelve el código
         `PP-XXXXXXXX` que el cliente muestra en el negocio. No se admiten dos canjes
         pendientes en la misma tarjeta.
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/CustomerCardId'
       requestBody:
@@ -590,7 +591,7 @@ paths:
     get:
       tags: [Cliente]
       summary: Mis canjes
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [pending, completed, rejected, cancelled] } }
         - $ref: '#/components/parameters/PerPage'
@@ -613,7 +614,7 @@ paths:
     get:
       tags: [Cliente]
       summary: Detalle de un canje (incluye el código a mostrar)
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/RedemptionId'
       responses:
@@ -631,7 +632,7 @@ paths:
     post:
       tags: [Cliente]
       summary: Cancelar un canje pendiente (devuelve sellos y stock)
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/RedemptionId'
       responses:
@@ -651,7 +652,7 @@ paths:
     get:
       tags: [Cliente]
       summary: Promociones de los negocios donde tengo tarjeta
-      security: [{ OAuth2: [cliente, negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - { name: business_id, in: query, schema: { type: string, format: uuid } }
         - $ref: '#/components/parameters/PerPage'
@@ -674,7 +675,7 @@ paths:
     get:
       tags: [Negocio]
       summary: Mi negocio
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       responses:
         '200':
           description: Negocio con sus tarjetas
@@ -689,7 +690,7 @@ paths:
     put:
       tags: [Negocio]
       summary: Actualizar los datos del negocio
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -724,7 +725,7 @@ paths:
     put:
       tags: [Negocio]
       summary: Configuración visual por defecto de las nuevas tarjetas
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -754,7 +755,7 @@ paths:
     post:
       tags: [Negocio]
       summary: Subir logo, fondo o icono de sello del negocio
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -780,7 +781,7 @@ paths:
     delete:
       tags: [Negocio]
       summary: Eliminar un asset del negocio
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - { name: type, in: path, required: true, schema: { type: string, enum: [logo, background, stamp_icon] } }
       responses:
@@ -798,7 +799,7 @@ paths:
     get:
       tags: [Negocio]
       summary: Tarjetas del negocio
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - { name: search, in: query, schema: { type: string } }
         - { name: is_active, in: query, schema: { type: boolean } }
@@ -821,7 +822,7 @@ paths:
     post:
       tags: [Negocio]
       summary: Crear una tarjeta (opcionalmente con recompensas)
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -873,7 +874,7 @@ paths:
     get:
       tags: [Negocio]
       summary: Detalle de una tarjeta
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       responses:
         '200':
           description: Tarjeta con sus recompensas
@@ -887,7 +888,7 @@ paths:
     put:
       tags: [Negocio]
       summary: Editar una tarjeta
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -921,7 +922,7 @@ paths:
     delete:
       tags: [Negocio]
       summary: Archivar una tarjeta
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       responses:
         '200':
           description: Tarjeta archivada
@@ -933,7 +934,7 @@ paths:
     post:
       tags: [Negocio]
       summary: Subir logo, fondo o icono de sello de la tarjeta
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/LoyaltyCardId'
       requestBody:
@@ -961,7 +962,7 @@ paths:
     post:
       tags: [Negocio]
       summary: Regenerar el código de alta (y su QR)
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/LoyaltyCardId'
       responses:
@@ -980,7 +981,7 @@ paths:
     post:
       tags: [Negocio]
       summary: Duplicar la tarjeta con sus recompensas
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/LoyaltyCardId'
       responses:
@@ -997,7 +998,7 @@ paths:
     get:
       tags: [Negocio]
       summary: QR de alta del programa
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/LoyaltyCardId'
       responses:
@@ -1011,7 +1012,7 @@ paths:
     get:
       tags: [Negocio]
       summary: Métricas del programa
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/LoyaltyCardId'
       responses:
@@ -1040,7 +1041,7 @@ paths:
     get:
       tags: [Negocio]
       summary: Recompensas de una tarjeta
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - { name: is_active, in: query, schema: { type: boolean } }
       responses:
@@ -1057,7 +1058,7 @@ paths:
     post:
       tags: [Negocio]
       summary: Crear una recompensa
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -1090,7 +1091,7 @@ paths:
     put:
       tags: [Negocio]
       summary: Editar una recompensa
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -1119,7 +1120,7 @@ paths:
     delete:
       tags: [Negocio]
       summary: Eliminar una recompensa
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       responses:
         '200':
           description: Recompensa eliminada
@@ -1132,7 +1133,7 @@ paths:
     get:
       tags: [Negocio]
       summary: Promociones del negocio
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - { name: is_active, in: query, schema: { type: boolean } }
         - { name: loyalty_card_id, in: query, schema: { type: string, format: uuid } }
@@ -1155,7 +1156,7 @@ paths:
     post:
       tags: [Negocio]
       summary: Crear una promoción
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -1192,7 +1193,7 @@ paths:
     get:
       tags: [Negocio]
       summary: Detalle de una promoción
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       responses:
         '200':
           description: Promoción
@@ -1205,7 +1206,7 @@ paths:
     put:
       tags: [Negocio]
       summary: Editar una promoción
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -1238,7 +1239,7 @@ paths:
     delete:
       tags: [Negocio]
       summary: Eliminar una promoción
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       responses:
         '200':
           description: Promoción eliminada
@@ -1255,7 +1256,7 @@ paths:
         anti-fraude (`CARD_STAMP_THROTTLE_SECONDS`) y el máximo diario
         (`CARD_MAX_STAMPS_PER_DAY`), registra el sello y actualiza el progreso dentro de
         una transacción. Si la tarjeta llega a `required_stamps` pasa a `completed`.
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -1297,7 +1298,7 @@ paths:
     get:
       tags: [Negocio]
       summary: Últimos escaneos del negocio
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - { name: limit, in: query, schema: { type: integer, default: 20, maximum: 100 } }
       responses:
@@ -1316,7 +1317,7 @@ paths:
     get:
       tags: [Negocio]
       summary: Historial de sellos con filtros
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - { name: loyalty_card_id, in: query, schema: { type: string, format: uuid } }
         - { name: customer_card_id, in: query, schema: { type: string, format: uuid } }
@@ -1343,7 +1344,7 @@ paths:
     delete:
       tags: [Negocio]
       summary: Anular un sello (revierte el progreso)
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - { name: stamp, in: path, required: true, schema: { type: string, format: uuid } }
       responses:
@@ -1364,7 +1365,7 @@ paths:
     get:
       tags: [Negocio]
       summary: Clientes del negocio (tarjetas emitidas)
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - { name: search, in: query, description: Nombre, email o código de tarjeta, schema: { type: string } }
         - { name: loyalty_card_id, in: query, schema: { type: string, format: uuid } }
@@ -1389,7 +1390,7 @@ paths:
     get:
       tags: [Negocio]
       summary: Ficha del cliente
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/CustomerCardId'
       responses:
@@ -1407,7 +1408,7 @@ paths:
     get:
       tags: [Negocio]
       summary: Canjes del negocio
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - { name: status, in: query, schema: { type: string, enum: [pending, completed, rejected, cancelled] } }
         - { name: from, in: query, schema: { type: string, format: date-time } }
@@ -1436,7 +1437,7 @@ paths:
         El negocio teclea o escanea el código `PP-XXXXXXXX` que muestra la app del cliente.
         Marca el canje como `completed`, registra quién lo aprobó y suma la recompensa
         entregada en la tarjeta del cliente.
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       requestBody:
         required: true
         content:
@@ -1462,7 +1463,7 @@ paths:
     post:
       tags: [Negocio]
       summary: Validar un canje por identificador
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/RedemptionId'
       responses:
@@ -1482,7 +1483,7 @@ paths:
     post:
       tags: [Negocio]
       summary: Rechazar un canje (devuelve sellos y stock)
-      security: [{ OAuth2: [negocio, admin] }]
+      security: [{ OAuth2: [] }]
       parameters:
         - $ref: '#/components/parameters/RedemptionId'
       requestBody:
@@ -1591,15 +1592,11 @@ components:
           schema: { $ref: '#/components/schemas/Error' }
           example: { message: 'Unauthenticated.', error: unauthenticated }
     Forbidden:
-      description: Sin permisos (rol, scope o Policy)
+      description: Sin permisos (rol o Policy)
       content:
         application/json:
           schema: { $ref: '#/components/schemas/Error' }
-          examples:
-            scope:
-              value: { message: 'This action requires the following scope(s): negocio.', error: missing_scope, required_scopes: [negocio] }
-            policy:
-              value: { message: 'Esa tarjeta no pertenece a otro negocio.', error: forbidden }
+          example: { message: 'Esa tarjeta no pertenece a otro negocio.', error: forbidden }
     NotFound:
       description: Recurso inexistente
       content:
@@ -1639,10 +1636,6 @@ components:
         message: { type: string }
         error: { type: string, description: Código estable del error }
         hint: { type: string, description: Detalle adicional (sólo en errores de configuración) }
-        required_scopes:
-          type: array
-          items: { type: string }
-          description: Scopes que faltaban (sólo en `missing_scope`)
 
     ValidationError:
       type: object
