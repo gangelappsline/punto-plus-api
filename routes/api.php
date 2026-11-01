@@ -2,6 +2,8 @@
 
 use App\Http\Controllers\Api\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Api\Admin\BusinessController as AdminBusinessController;
+use App\Http\Controllers\Api\Client\PromotionController as ClientPromotionController;
+use App\Http\Controllers\Api\Client\NearMeController as ClientNearMeController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BusinessController;
 use App\Http\Controllers\Api\BusinessQrController;
@@ -45,9 +47,6 @@ Route::middleware(['auth:api'])->group(function () {
 });
 Route::prefix('admin')->name('admin.')->middleware(['auth:api', 'role:admin'])->group(function (): void {
     Route::apiResource('business', AdminBusinessController::class);
-    Route::post('business/{business}/restore', [AdminBusinessController::class, 'restore'])
-        ->name('business.restore')
-        ->withTrashed();
     Route::apiResource('categories', AdminCategoryController::class);
 });
 // ---------------------------------------------------------------------------
@@ -100,7 +99,8 @@ Route::middleware('auth:api')->group(function (): void {
         Route::post('redemptions/{redemption}/cancel', [RedemptionController::class, 'cancel'])->name('redemptions.cancel');
 
         // Promociones activas de los negocios en los que el cliente tiene tarjeta.
-        Route::get('promotions', [PromotionController::class, 'forCustomer'])->name('promotions.index');
+        Route::get('promotions', [ClientPromotionController::class, 'index'])->name('promotions.index');
+        Route::get('/near-me', [ClientNearMeController::class, 'index'])->name('client.near-me');
     });
 
     /*

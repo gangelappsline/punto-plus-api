@@ -67,7 +67,7 @@ class AuthController extends Controller
 
         $user->load('business');
 
-        try {
+        /*try {
             $token = $this->issueToken(
                 email: $data['email'],
                 password: $data['password'],
@@ -77,12 +77,11 @@ class AuthController extends Controller
             );
         } catch (OAuthConfigurationException $e) {
             return $this->configurationErrorResponse($e);
-        }
+        }*/
 
         return response()->json([
             'message' => 'Registro completado correctamente.',
             'user' => new UserResource($user),
-            'authorization' => $token->toArray(),
         ], 201);
     }
 
