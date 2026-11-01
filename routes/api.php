@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\Api\Admin\CategoryController as AdminCategoryController;
+use App\Http\Controllers\Api\Admin\BusinessController as AdminBusinessController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BusinessController;
 use App\Http\Controllers\Api\BusinessQrController;
@@ -38,8 +39,12 @@ Route::prefix('/public')->group(function () {
 Route::middleware(['auth:api'])->group(function () {
     Route::get('/business/card', [App\Http\Controllers\Api\Public\BusinessController::class, 'card']);
     Route::put('/business/card', [App\Http\Controllers\Api\Public\BusinessController::class, 'updateCard']);
+
+    Route::get('/business/configurations', [App\Http\Controllers\Api\Business\ConfigurationController::class, 'index']);
+    Route::put('/business/configurations/qr-code', [App\Http\Controllers\Api\Business\ConfigurationController::class, 'updateQrCode']);
 });
 Route::prefix('admin')->name('admin.')->middleware(['auth:api', 'role:admin'])->group(function (): void {
+    Route::apiResource('business', AdminBusinessController::class);
     Route::apiResource('categories', AdminCategoryController::class);
 });
 // ---------------------------------------------------------------------------

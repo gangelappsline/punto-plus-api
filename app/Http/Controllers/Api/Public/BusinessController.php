@@ -63,6 +63,9 @@ class BusinessController extends Controller
                     case 'design':
                         $this->saveDesign($business, $section);
                         break;
+                    case 'service':
+                        
+                        break;
                 }
             });
         } catch (Throwable $exception) {
