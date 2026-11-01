@@ -110,7 +110,9 @@ Route::middleware('auth:api')->group(function (): void {
 
         // Alias histórico de `/api/client/promotions` (misma acción y semántica).
         Route::get('promotions', [ClientPromotionController::class, 'index'])->name('promotions.index');
-        Route::get('/near-me', [ClientNearMeController::class, 'index'])->name('promotions.near-me');
+
+        // Negocios a menos de 10 km de la ubicación enviada (`latitude`/`longitude`).
+        Route::get('near-me', [ClientNearMeController::class, 'index'])->name('near-me.index');
     });
 
     /*
