@@ -15,6 +15,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class BusinessCategory extends Model
 {
 
+    public $timestamps = false;
+    protected $table = 'business_categories';
+
     public function business(): BelongsTo
     {
         return $this->belongsTo(Business::class);

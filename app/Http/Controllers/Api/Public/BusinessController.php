@@ -44,23 +44,24 @@ class BusinessController extends Controller
         $business = Business::where('user_id', $request->user()->id)->firstOrFail();
         $data = $request->validated();
         $step = $data['step'];
+        $section = $data['data'];
         $storedPaths = [];
         $pathsToDelete = [];
 
         try {
-            DB::transaction(function () use ($business, $data, $step, &$storedPaths, &$pathsToDelete): void {
+            DB::transaction(function () use ($business, $section, $step, &$storedPaths, &$pathsToDelete): void {
                 switch ($step) {
                     case 'information':
-                        $this->saveInformation($business, $data['information'], $storedPaths, $pathsToDelete);
+                        $this->saveInformation($business, $section, $storedPaths, $pathsToDelete);
                         break;
                     case 'categories':
-                        $this->saveCategories($business, $data['categories']['category_ids']);
+                        $this->saveCategories($business, $section['category_ids']);
                         break;
                     case 'products':
-                        $this->saveProducts($business, $data['products']['products'], $storedPaths, $pathsToDelete);
+                        $this->saveProducts($business, $section['products'], $storedPaths, $pathsToDelete);
                         break;
                     case 'design':
-                        $this->saveDesign($business, $data['design']);
+                        $this->saveDesign($business, $section);
                         break;
                 }
             });
@@ -150,11 +151,11 @@ class BusinessController extends Controller
         $categoryIds = array_values(array_map('intval', $categoryIds));
         $business->categories()->delete();
 
-        $menuCategories = $business->menuCategories()->whereNotNull('source_category_id');
+        $mappedMenuCategories = $business->menuCategories()->whereNotNull('source_category_id');
         if ($categoryIds !== []) {
-            $menuCategories->whereNotIn('source_category_id', $categoryIds);
+            $mappedMenuCategories->whereNotIn('source_category_id', $categoryIds);
         }
-        $menuCategories->update(['is_active' => false]);
+        $mappedMenuCategories->update(['is_active' => false]);
 
         foreach ($categoryIds as $position => $categoryId) {
             $category = Category::query()->findOrFail($categoryId);
@@ -200,7 +201,7 @@ class BusinessController extends Controller
         foreach ($products as $index => $data) {
             if (! in_array((int) $data['category_id'], $selectedCategoryIds, true)) {
                 throw ValidationException::withMessages([
-                    "products.products.{$index}.category_id" => 'La categoría del producto debe estar seleccionada para este negocio.',
+                    "data.products.{$index}.category_id" => 'La categoría del producto debe estar seleccionada para este negocio.',
                 ]);
             }
 
@@ -209,7 +210,7 @@ class BusinessController extends Controller
                 ->value('id');
             if ($menuCategoryId === null) {
                 throw ValidationException::withMessages([
-                    "products.products.{$index}.category_id" => 'Guarda primero las categorías del negocio antes de asignar productos.',
+                    "data.products.{$index}.category_id" => 'Guarda primero las categorías del negocio antes de asignar productos.',
                 ]);
             }
 
@@ -217,7 +218,7 @@ class BusinessController extends Controller
             $product = $business->products()->whereKey($id)->first();
             if ($product === null && Product::query()->whereKey($id)->exists()) {
                 throw ValidationException::withMessages([
-                    "products.products.{$index}.id" => 'El identificador del producto ya está asociado a otro negocio.',
+                    "data.products.{$index}.id" => 'El identificador del producto ya está asociado a otro negocio.',
                 ]);
             }
 
@@ -232,7 +233,7 @@ class BusinessController extends Controller
                 $storedImagePath = $this->pathFromProductImageUrl($submittedImage, $business, $id);
                 if ($product === null || $storedImagePath === null || ! in_array($storedImagePath, $oldPaths, true)) {
                     throw ValidationException::withMessages([
-                        "products.products.{$index}.image_url" => 'La URL debe corresponder a una imagen ya guardada para este producto.',
+                        "data.products.{$index}.image_url" => 'La URL debe corresponder a una imagen ya guardada para este producto.',
                     ]);
                 }
 

@@ -141,7 +141,7 @@ class BusinessOnboardingTest extends TestCase
 
         $this->actingAsApi($this->owner, [])->putJson('/api/business/card', $payload)
             ->assertUnprocessable()
-            ->assertJsonValidationErrors('products.products.0.category_id');
+            ->assertJsonValidationErrors('data.products.0.category_id');
 
         $this->actingAsApi($this->owner, [])->putJson('/api/business/card', [
             'information' => ['name' => 'Sin selector'],
