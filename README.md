@@ -280,10 +280,12 @@ los errores devuelven `message` y un campo `error` con código estable.
 
 `PUT /api/business/card` requiere el selector `step` y guarda únicamente esa sección para persistir el asistente paso a paso:
 
-- `information`: incluye `name`, `description`, `welcome_message`, `logo_url`, `background_url`, `phone`, `phone_numbers[]` y `address`. Las imágenes JPEG/PNG/WebP en base64 o data URI se guardan en el disco público.
-- `categories`: `categories.category_ids[]` reemplaza la selección de categorías del negocio.
-- `products`: `products.products[]` crea o actualiza productos por UUID (`id`) con `name`, `description`, `price`, `category_id`, `image_url`, `position` y `available`. Las imágenes se guardan en el disco público; los productos omitidos en una llamada posterior no se eliminan.
-- `design`: combina `primary_color`, `secondary_color`, `font_family` y `menu_style` con el diseño del menú existente.
+El cuerpo se envía como `{ "step": "...", "data": { ... } }`:
+
+- `information`: `data` incluye `name`, `description`, `welcome_message`, `logo_url`, `background_url`, `phone`, `phone_numbers[]` y `address`. Las imágenes nuevas JPEG/PNG/WebP en base64 o data URI se guardan en el disco público.
+- `categories`: `data.category_ids[]` reemplaza la selección de categorías del negocio.
+- `products`: `data.products[]` crea o actualiza productos por UUID (`id`) con `name`, `description`, `price`, `category_id`, `image_url`, `position` y `available`. `image_url` acepta base64/data URI para imágenes nuevas o la URL pública de una imagen ya guardada para ese mismo producto; los productos omitidos no se eliminan.
+- `design`: `data` contiene `primary_color`, `secondary_color`, `font_family` y `menu_style`; los campos se combinan con el diseño existente.
 
 Las fotos se envían en `images` como data URIs o cadenas base64 de JPEG, PNG o WEBP; se requieren de 1 a 5. Cada presentación tiene un `price` opcional: si es `null`, hereda el precio base del producto. Los iconos de fotos en respuestas son URLs públicas.
 

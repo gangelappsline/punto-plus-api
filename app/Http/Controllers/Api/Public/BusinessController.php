@@ -222,15 +222,32 @@ class BusinessController extends Controller
             }
 
             $oldPaths = $product?->images()->pluck('path')->all() ?? [];
-            foreach ($oldPaths as $oldPath) {
-                $pathsToDelete[] = $oldPath;
-            }
+            $submittedImage = $this->normalizeImageUrl($data['image_url']);
+            $imageUrlParts = parse_url($submittedImage);
+            $isExistingImageUrl = is_array($imageUrlParts)
+                && in_array(strtolower($imageUrlParts['scheme'] ?? ''), ['http', 'https'], true)
+                && filled($imageUrlParts['host'] ?? null);
 
-            $imagePath = $this->assets->storePublicBase64Image(
-                $data['image_url'],
-                'businesses/'.$business->getKey().'/products/'.$id,
-            );
-            $storedPaths[] = $imagePath;
+            if ($isExistingImageUrl) {
+                $storedImagePath = $this->pathFromProductImageUrl($submittedImage, $business, $id);
+                if ($product === null || $storedImagePath === null || ! in_array($storedImagePath, $oldPaths, true)) {
+                    throw ValidationException::withMessages([
+                        "products.products.{$index}.image_url" => 'La URL debe corresponder a una imagen ya guardada para este producto.',
+                    ]);
+                }
+
+                $imagePath = null;
+            } else {
+                foreach ($oldPaths as $oldPath) {
+                    $pathsToDelete[] = $oldPath;
+                }
+
+                $imagePath = $this->assets->storePublicBase64Image(
+                    $submittedImage,
+                    'businesses/'.$business->getKey().'/products/'.$id,
+                );
+                $storedPaths[] = $imagePath;
+            }
 
             $attributes = [
                 'category_id' => $data['category_id'],
@@ -250,9 +267,33 @@ class BusinessController extends Controller
                 $product->fill($attributes)->save();
             }
 
-            $product->images()->delete();
-            $product->images()->create(['path' => $imagePath, 'sort_order' => 0]);
+            if ($imagePath !== null) {
+                $product->images()->delete();
+                $product->images()->create(['path' => $imagePath, 'sort_order' => 0]);
+            }
         }
+    }
+
+    private function normalizeImageUrl(string $value): string
+    {
+        if (preg_match('/\A\[(https?:\/\/[^\]]+)\]\((https?:\/\/[^)]+)\)\z/', $value, $matches)) {
+            return $matches[2];
+        }
+
+        return $value;
+    }
+
+    private function pathFromProductImageUrl(string $url, Business $business, string $productId): ?string
+    {
+        $urlPath = parse_url($url, PHP_URL_PATH);
+        if (! is_string($urlPath) || ! str_starts_with($urlPath, '/storage/')) {
+            return null;
+        }
+
+        $path = rawurldecode(substr($urlPath, strlen('/storage/')));
+        $expectedPrefix = 'businesses/'.$business->getKey().'/products/'.$productId.'/';
+
+        return str_starts_with($path, $expectedPrefix) ? $path : null;
     }
 
     /** @param array<string, mixed> $data */

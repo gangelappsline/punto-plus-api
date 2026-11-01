@@ -3,6 +3,7 @@
 namespace App\Http\Requests\Business;
 
 use App\Rules\ImageBase64Input;
+use App\Rules\OnboardingProductImageInput;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -46,7 +47,7 @@ class SaveBusinessOnboardingStepRequest extends FormRequest
                 'products.products.*.description' => ['sometimes', 'nullable', 'string', 'max:5000'],
                 'products.products.*.price' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999999.99'],
                 'products.products.*.category_id' => ['required', 'integer', 'exists:categories,id'],
-                'products.products.*.image_url' => ['required', 'string', new ImageBase64Input],
+                'products.products.*.image_url' => ['required', 'string', new OnboardingProductImageInput],
                 'products.products.*.position' => ['sometimes', 'integer', 'min:0', 'max:65535'],
                 'products.products.*.available' => ['sometimes', 'boolean'],
             ],
@@ -59,5 +60,40 @@ class SaveBusinessOnboardingStepRequest extends FormRequest
             ],
             default => [],
         };
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $data = $this->input('data');
+        if (! is_array($data)) {
+            return;
+        }
+
+        $section = match ($this->input('step')) {
+            'information' => $data['information'] ?? $data,
+            'categories' => $data['categories'] ?? $data,
+            'products' => [
+                'products' => is_array($data['products'] ?? null)
+                    && array_key_exists('products', $data['products'])
+                    ? $data['products']['products']
+                    : ($data['products'] ?? null),
+            ],
+            'design' => $data['design'] ?? $data,
+            default => null,
+        };
+
+        if (is_array($section)) {
+            $field = match ($this->input('step')) {
+                'information' => 'information',
+                'categories' => 'categories',
+                'products' => 'products',
+                'design' => 'design',
+                default => null,
+            };
+
+            if ($field !== null) {
+                $this->merge([$field => $section]);
+            }
+        }
     }
 }
