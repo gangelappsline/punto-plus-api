@@ -13,12 +13,10 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Validation\ValidationException;
-use Laravel\Passport\Attributes\AuthorizeToken;
 
 /**
  * Promociones que el negocio publica para atraer y retener clientes.
  */
-#[AuthorizeToken(['negocio', 'admin'], anyScope: true)]
 class PromotionController extends Controller
 {
     /**
@@ -102,7 +100,6 @@ class PromotionController extends Controller
     /**
      * GET /api/customer/promotions — promociones vigentes de mis negocios.
      */
-    #[AuthorizeToken(['cliente', 'negocio', 'admin'], anyScope: true)]
     public function forCustomer(Request $request): AnonymousResourceCollection
     {
         $filters = $request->validate([
