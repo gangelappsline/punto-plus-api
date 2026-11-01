@@ -6,7 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Product\StoreProductRequest;
 use App\Http\Requests\Product\UpdateProductRequest;
 use App\Http\Resources\ProductResource;
-use App\Models\MenuCategory;
+use App\Models\BusinessCategory;
 use App\Models\Product;
 use App\Services\AssetService;
 use Illuminate\Http\JsonResponse;
@@ -22,11 +22,11 @@ class ProductController extends Controller
     {
     }
 
-    /** GET /api/business/menu/categories/{menuCategory}/products */
-    public function indexForCategory(Request $request, MenuCategory $menuCategory): AnonymousResourceCollection
+    /** GET /api/business/menu/categories/{businessCategory}/products */
+    public function indexForCategory(Request $request, BusinessCategory $businessCategory): AnonymousResourceCollection
     {
         $business = $this->businessOrFail($request);
-        $this->ensureCategoryBelongsToBusiness($menuCategory, (string) $business->getKey());
+        $this->ensureCategoryBelongsToBusiness($businessCategory, (string) $business->getKey());
 
         $filters = $request->validate([
             'search' => ['nullable', 'string', 'max:180'],
@@ -34,11 +34,11 @@ class ProductController extends Controller
             'per_page' => ['nullable', 'integer', 'min:1', 'max:'.config('punto_plus.per_page.max')],
         ]);
 
-        $products = $menuCategory->products()
-            ->where('business_id', $business->getKey())
+        $products = $business->products()
+            ->where('category_id', $businessCategory->category_id)
             ->when(filled($filters['search'] ?? null), fn ($query) => $query->where('name', 'like', '%'.$filters['search'].'%'))
             ->when(isset($filters['is_available']), fn ($query) => $query->where('is_available', (bool) $filters['is_available']))
-            ->with(['images', 'presentations.product', 'menuCategory'])
+            ->with(['images', 'presentations.product', 'category'])
             ->orderBy('sort_order')
             ->orderBy('name')
             ->paginate($this->perPage($request))
@@ -47,11 +47,11 @@ class ProductController extends Controller
         return ProductResource::collection($products);
     }
 
-    /** POST /api/business/menu/categories/{menuCategory}/products */
-    public function storeForCategory(StoreProductRequest $request, MenuCategory $menuCategory): JsonResponse
+    /** POST /api/business/menu/categories/{businessCategory}/products */
+    public function storeForCategory(StoreProductRequest $request, BusinessCategory $businessCategory): JsonResponse
     {
         $business = $this->businessOrFail($request);
-        $this->ensureCategoryBelongsToBusiness($menuCategory, (string) $business->getKey());
+        $this->ensureCategoryBelongsToBusiness($businessCategory, (string) $business->getKey());
 
         $data = $request->validated();
         $images = $data['images'];
@@ -60,10 +60,10 @@ class ProductController extends Controller
         $storedPaths = [];
 
         try {
-            $product = DB::transaction(function () use ($data, $images, $business, $menuCategory, &$storedPaths): Product {
-                $product = $menuCategory->products()->create([
+            $product = DB::transaction(function () use ($data, $images, $business, $businessCategory, &$storedPaths): Product {
+                $product = $business->products()->create([
                     ...$data,
-                    'business_id' => $business->getKey(),
+                    'category_id' => $businessCategory->category_id,
                 ]);
 
                 foreach ($images as $sortOrder => $imageData) {
@@ -108,12 +108,14 @@ class ProductController extends Controller
         $newImages = $data['images'] ?? [];
         unset($data['images']);
 
-        if (array_key_exists('menu_category_id', $data)) {
-            $category = $business->menuCategories()->find($data['menu_category_id']);
+        if (array_key_exists('category_id', $data)) {
+            $categoryIsAssigned = $business->categories()
+                ->where('category_id', $data['category_id'])
+                ->exists();
 
-            if ($category === null) {
+            if (! $categoryIsAssigned) {
                 throw ValidationException::withMessages([
-                    'menu_category_id' => 'La categoría seleccionada no pertenece a tu negocio.',
+                    'category_id' => 'La categoría seleccionada no pertenece a tu negocio.',
                 ]);
             }
         }
@@ -173,16 +175,16 @@ class ProductController extends Controller
     private function loadProductRelations(Product $product): Product
     {
         return $product->load([
-            'menuCategory',
+            'category',
             'images',
             'presentations' => fn ($query) => $query->orderBy('sort_order')->orderBy('name'),
             'presentations.product',
         ]);
     }
 
-    private function ensureCategoryBelongsToBusiness(MenuCategory $category, string $businessId): void
+    private function ensureCategoryBelongsToBusiness(BusinessCategory $category, string $businessId): void
     {
-        abort_unless((string) $category->business_id === $businessId, 404, 'La categoría del menú no existe.');
+        abort_unless((string) $category->business_id === $businessId, 404, 'La categoría no pertenece a este negocio.');
     }
 
     private function ensureProductBelongsToBusiness(Product $product, string $businessId): void

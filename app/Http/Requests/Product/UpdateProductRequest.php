@@ -4,7 +4,6 @@ namespace App\Http\Requests\Product;
 
 use App\Rules\ImageBase64Input;
 use Illuminate\Foundation\Http\FormRequest;
-use Illuminate\Validation\Rule;
 
 class UpdateProductRequest extends FormRequest
 {
@@ -19,7 +18,7 @@ class UpdateProductRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'menu_category_id' => ['sometimes', 'integer', 'exists:menu_categories,id'],
+            'category_id' => ['sometimes', 'integer', 'exists:categories,id'],
             'name' => ['sometimes', 'required', 'string', 'max:180'],
             'description' => ['sometimes', 'nullable', 'string', 'max:5000'],
             'price' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:99999999.99'],

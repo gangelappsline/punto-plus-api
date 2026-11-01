@@ -6,7 +6,7 @@ use App\Http\Controllers\Api\BusinessController;
 use App\Http\Controllers\Api\BusinessQrController;
 use App\Http\Controllers\Api\CustomerCardController;
 use App\Http\Controllers\Api\LoyaltyCardController;
-use App\Http\Controllers\Api\MenuCategoryController;
+use App\Http\Controllers\Api\BusinessCategoryController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ProductPresentationController;
 use App\Http\Controllers\Api\PromotionController;
@@ -119,10 +119,10 @@ Route::middleware('auth:api')->group(function (): void {
         Route::delete('assets/{type}', [BusinessController::class, 'destroyAsset'])->name('assets.destroy');
 
         // Menú de productos y categorías propias del negocio.
-        Route::apiResource('menu/categories', MenuCategoryController::class)
-            ->parameters(['categories' => 'menuCategory']);
-        Route::get('menu/categories/{menuCategory}/products', [ProductController::class, 'indexForCategory'])->name('menu.products.index');
-        Route::post('menu/categories/{menuCategory}/products', [ProductController::class, 'storeForCategory'])->name('menu.products.store');
+        Route::apiResource('menu/categories', BusinessCategoryController::class)
+            ->parameters(['categories' => 'businessCategory']);
+        Route::get('menu/categories/{businessCategory}/products', [ProductController::class, 'indexForCategory'])->name('menu.products.index');
+        Route::post('menu/categories/{businessCategory}/products', [ProductController::class, 'storeForCategory'])->name('menu.products.store');
         Route::get('menu/products/{product}', [ProductController::class, 'show'])->name('menu.products.show');
         Route::put('menu/products/{product}', [ProductController::class, 'update'])->name('menu.products.update');
         Route::patch('menu/products/{product}', [ProductController::class, 'update']);

@@ -2,8 +2,9 @@
 
 namespace App\Http\Requests\Business;
 
-use App\Rules\ImageBase64Input;
+use App\Rules\ImageUrlOrBase64Input;
 use App\Rules\OnboardingProductImageInput;
+use App\Rules\PhoneNumbersInput;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
 
@@ -27,11 +28,10 @@ class SaveBusinessOnboardingStepRequest extends FormRequest
                 'data.name' => ['required', 'string', 'max:150'],
                 'data.description' => ['sometimes', 'nullable', 'string', 'max:1000'],
                 'data.welcome_message' => ['sometimes', 'nullable', 'string', 'max:180'],
-                'data.logo_url' => ['sometimes', 'nullable', 'string', new ImageBase64Input],
-                'data.background_url' => ['sometimes', 'nullable', 'string', new ImageBase64Input],
-                'data.phone' => ['sometimes', 'nullable', 'string', 'max:30'],
-                'data.phone_numbers' => ['sometimes', 'array', 'max:10'],
-                'data.phone_numbers.*' => ['required', 'string', 'max:30'],
+                'data.logo_url' => ['sometimes', 'nullable', 'string', new ImageUrlOrBase64Input],
+                'data.background_url' => ['sometimes', 'nullable', 'string', new ImageUrlOrBase64Input],
+                'data.phone' => ['sometimes', 'nullable', 'string', 'max:320', new PhoneNumbersInput],
+                'data.phone_numbers' => ['sometimes', 'nullable', new PhoneNumbersInput],
                 'data.address' => ['sometimes', 'nullable', 'string', 'max:190'],
             ],
             'categories' => [

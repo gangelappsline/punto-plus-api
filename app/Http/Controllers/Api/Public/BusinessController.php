@@ -6,13 +6,13 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Business\SaveBusinessOnboardingStepRequest;
 use App\Http\Resources\BusinessResource;
 use App\Models\Business;
-use App\Models\Category;
-use App\Models\MenuCategory;
 use App\Models\Product;
 use App\Services\AssetService;
+use App\Support\ImageInput;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Illuminate\Validation\ValidationException;
 use Throwable;
@@ -79,7 +79,7 @@ class BusinessController extends Controller
 
         $business->refresh()->load([
             'products.images',
-            //'products.menuCategory',
+            'products.category',
             'owner',
             'loyaltyCards',
             'categories.category',
@@ -98,14 +98,25 @@ class BusinessController extends Controller
     {
         $previousName = $business->name;
         $attributes = [];
-        foreach (['name', 'description', 'phone', 'address'] as $field) {
+        foreach (['name', 'description', 'address'] as $field) {
             if (array_key_exists($field, $data)) {
                 $attributes[$field] = $data[$field];
             }
         }
 
-        if (array_key_exists('phone_numbers', $data)) {
-            $attributes['phone_numbers'] = array_values($data['phone_numbers'] ?? []);
+        $phoneNumbers = array_key_exists('phone_numbers', $data)
+            ? $this->normalizePhoneNumbers($data['phone_numbers'])
+            : ($business->phone_numbers ?? []);
+        if (array_key_exists('phone', $data)) {
+            $submittedPhoneNumbers = $this->normalizePhoneNumbers($data['phone']);
+            $attributes['phone'] = array_shift($submittedPhoneNumbers);
+            if ($submittedPhoneNumbers !== [] && ! array_key_exists('phone_numbers', $data)) {
+                $phoneNumbers = [];
+            }
+            $phoneNumbers = array_values(array_unique([...$phoneNumbers, ...$submittedPhoneNumbers]));
+        }
+        if (array_key_exists('phone_numbers', $data) || (array_key_exists('phone', $data) && $phoneNumbers !== [])) {
+            $attributes['phone_numbers'] = $phoneNumbers;
         }
 
         if (array_key_exists('welcome_message', $data)) {
@@ -121,17 +132,31 @@ class BusinessController extends Controller
             }
 
             $currentPath = $business->{$column};
-            if ($currentPath !== null) {
-                $pathsToDelete[] = $currentPath;
-            }
-
             if ($data[$input] === null) {
+                if ($currentPath !== null) {
+                    $pathsToDelete[] = $currentPath;
+                }
                 $attributes[$column] = null;
                 continue;
             }
 
+            $imageInput = ImageInput::normalizeMarkdownLink($data[$input]);
+            if (ImageInput::isHttpUrl($imageInput)) {
+                if (! $this->urlMatchesStoredAsset($imageInput, $currentPath)) {
+                    if ($currentPath !== null) {
+                        $pathsToDelete[] = $currentPath;
+                    }
+                    $attributes[$column] = $imageInput;
+                }
+                continue;
+            }
+
+            if ($currentPath !== null) {
+                $pathsToDelete[] = $currentPath;
+            }
+
             $path = $this->assets->storePublicBase64Image(
-                $data[$input],
+                $imageInput,
                 $this->assets->businessDirectory((string) $business->getKey()),
             );
             $storedPaths[] = $path;
@@ -148,44 +173,13 @@ class BusinessController extends Controller
     /** @param list<int> $categoryIds */
     private function saveCategories(Business $business, array $categoryIds): void
     {
-        $categoryIds = array_values(array_map('intval', $categoryIds));
         $business->categories()->delete();
 
-        $mappedMenuCategories = $business->categories()->whereNotNull('category_id');
-        if ($categoryIds !== []) {
-            $mappedMenuCategories->whereNotIn('category_id', $categoryIds);
-        }
-        $mappedMenuCategories->update(['is_active' => false]);
-
-        foreach ($categoryIds as $position => $categoryId) {
-            $category = Category::query()->findOrFail($categoryId);
+        foreach (array_values(array_map('intval', $categoryIds)) as $position => $categoryId) {
             $business->categories()->create([
                 'category_id' => $categoryId,
                 'sort_order' => $position,
             ]);
-
-            $menuCategory = $business->categories()
-                ->where('category_id', $categoryId)
-                ->first();
-
-            if ($menuCategory === null) {
-                $menuCategory = $business->categories()
-                    ->whereNull('category_id')
-                    ->where('name', $category->name)
-                    ->first();
-            }
-
-            if ($menuCategory === null) {
-                $menuCategory = new Category;
-                $menuCategory->business_id = $business->getKey();
-            }
-
-            $menuCategory->fill([
-                'category_id' => $categoryId,
-                'name' => $category->name,
-                'sort_order' => $position,
-                'is_active' => true,
-            ])->save();
         }
     }
 
@@ -205,15 +199,6 @@ class BusinessController extends Controller
                 ]);
             }
 
-            $menuCategoryId = $business->categories()
-                ->where('category_id', $data['category_id'])
-                ->value('id');
-            if ($menuCategoryId === null) {
-                throw ValidationException::withMessages([
-                    "data.products.{$index}.category_id" => 'Guarda primero las categorías del negocio antes de asignar productos.',
-                ]);
-            }
-
             $id = $data['id'];
             $product = $business->products()->whereKey($id)->first();
             if ($product === null && Product::query()->whereKey($id)->exists()) {
@@ -223,11 +208,8 @@ class BusinessController extends Controller
             }
 
             $oldPaths = $product?->images()->pluck('path')->all() ?? [];
-            $submittedImage = $this->normalizeImageUrl($data['image_url']);
-            $imageUrlParts = parse_url($submittedImage);
-            $isExistingImageUrl = is_array($imageUrlParts)
-                && in_array(strtolower($imageUrlParts['scheme'] ?? ''), ['http', 'https'], true)
-                && filled($imageUrlParts['host'] ?? null);
+            $submittedImage = ImageInput::normalizeMarkdownLink($data['image_url']);
+            $isExistingImageUrl = ImageInput::isHttpUrl($submittedImage);
 
             if ($isExistingImageUrl) {
                 $storedImagePath = $this->pathFromProductImageUrl($submittedImage, $business, $id);
@@ -252,7 +234,6 @@ class BusinessController extends Controller
 
             $attributes = [
                 'category_id' => $data['category_id'],
-                //'menu_category_id' => $menuCategoryId,
                 'name' => $data['name'],
                 'description' => $data['description'] ?? null,
                 'price' => $data['price'] ?? null,
@@ -275,13 +256,47 @@ class BusinessController extends Controller
         }
     }
 
-    private function normalizeImageUrl(string $value): string
+    private function urlMatchesStoredAsset(string $url, ?string $storedPath): bool
     {
-        if (preg_match('/\A\[(https?:\/\/[^\]]+)\]\((https?:\/\/[^)]+)\)\z/', $value, $matches)) {
-            return $matches[2];
+        if ($storedPath === null) {
+            return false;
         }
 
-        return $value;
+        if ($url === $storedPath) {
+            return true;
+        }
+
+        $storedUrl = Storage::disk('public')->url($storedPath);
+        if ($url === $storedUrl) {
+            return true;
+        }
+
+        $urlPath = parse_url($url, PHP_URL_PATH);
+        $storedUrlPath = parse_url($storedUrl, PHP_URL_PATH);
+
+        return is_string($urlPath) && is_string($storedUrlPath) && $urlPath === $storedUrlPath;
+    }
+
+    /** @return list<string> */
+    private function normalizePhoneNumbers(array|string|null $value): array
+    {
+        $items = is_array($value) ? $value : [$value];
+        $numbers = [];
+
+        foreach ($items as $item) {
+            if (! is_string($item)) {
+                continue;
+            }
+
+            foreach (explode(',', $item) as $number) {
+                $number = trim($number);
+                if ($number !== '') {
+                    $numbers[] = $number;
+                }
+            }
+        }
+
+        return array_values(array_unique($numbers));
     }
 
     private function pathFromProductImageUrl(string $url, Business $business, string $productId): ?string

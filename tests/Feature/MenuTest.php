@@ -3,7 +3,8 @@
 namespace Tests\Feature;
 
 use App\Models\Business;
-use App\Models\MenuCategory;
+use App\Models\BusinessCategory;
+use App\Models\Category;
 use App\Models\Product;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -36,8 +37,9 @@ class MenuTest extends TestCase
 
     public function test_negocio_administra_menu_productos_presentaciones_y_fotos_publicas(): void
     {
+        $globalCategory = Category::create(['name' => 'Bebidas']);
         $categoryResponse = $this->actingAsApi($this->owner, [])->postJson('/api/business/menu/categories', [
-            'name' => 'Bebidas',
+            'category_id' => $globalCategory->id,
             'sort_order' => 1,
         ]);
 
@@ -99,9 +101,10 @@ class MenuTest extends TestCase
 
     public function test_producto_requiere_de_una_a_cinco_imagenes_base64(): void
     {
-        $category = MenuCategory::create([
+        $globalCategory = Category::create(['name' => 'Postres']);
+        $category = BusinessCategory::create([
             'business_id' => $this->business->getKey(),
-            'name' => 'Postres',
+            'category_id' => $globalCategory->id,
         ]);
         $endpoint = '/api/business/menu/categories/'.$category->id.'/products';
 
@@ -118,9 +121,10 @@ class MenuTest extends TestCase
 
     public function test_un_negocio_no_puede_consultar_categorias_de_menu_de_otro_negocio(): void
     {
-        $category = MenuCategory::create([
+        $globalCategory = Category::create(['name' => 'Bebidas']);
+        $category = BusinessCategory::create([
             'business_id' => $this->business->getKey(),
-            'name' => 'Bebidas',
+            'category_id' => $globalCategory->id,
         ]);
 
         $otherOwner = User::factory()->negocio()->create();

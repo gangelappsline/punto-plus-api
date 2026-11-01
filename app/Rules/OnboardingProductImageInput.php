@@ -2,6 +2,7 @@
 
 namespace App\Rules;
 
+use App\Support\ImageInput;
 use Closure;
 use Illuminate\Contracts\Validation\ValidationRule;
 
@@ -16,26 +17,11 @@ class OnboardingProductImageInput implements ValidationRule
             return;
         }
 
-        $url = $this->extractUrl($value);
-        $parts = is_string($url) ? parse_url($url) : false;
-
-        if (
-            is_array($parts)
-            && in_array(strtolower($parts['scheme'] ?? ''), ['http', 'https'], true)
-            && filled($parts['host'] ?? null)
-        ) {
+        $url = ImageInput::normalizeMarkdownLink($value);
+        if (ImageInput::isHttpUrl($url)) {
             return;
         }
 
         (new ImageBase64Input)->validate($attribute, $value, $fail);
-    }
-
-    private function extractUrl(string $value): ?string
-    {
-        if (preg_match('/\A\[(https?:\/\/[^\]]+)\]\((https?:\/\/[^)]+)\)\z/', $value, $matches)) {
-            return $matches[2];
-        }
-
-        return $value;
     }
 }

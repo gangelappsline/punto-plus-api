@@ -3,7 +3,7 @@
 namespace App\Http\Controllers\Api\Public;
 
 use App\Http\Controllers\Controller;
-use App\Http\Resources\MenuCategoryResource;
+use App\Http\Resources\BusinessMenuCategoryResource;
 use App\Models\Business;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
@@ -17,27 +17,34 @@ class MenuController extends Controller
             ->where('is_active', true)
             ->firstOrFail();
 
-        $categories = $business->menuCategories()
-            ->where('is_active', true)
+        $categories = $business->categories()
+            ->with('category')
+            ->orderBy('sort_order')
+            ->get();
+
+        $products = $business->products()
+            ->whereIn('category_id', $categories->pluck('category_id'))
+            ->where('is_available', true)
             ->with([
-                'products' => fn ($query) => $query
-                    ->where('business_id', $business->getKey())
-                    ->where('is_available', true)
-                    ->with([
-                        'images',
-                        'presentations' => fn ($presentations) => $presentations
-                            ->where('is_active', true)
-                            ->orderBy('sort_order')
-                            ->orderBy('name'),
-                        'presentations.product',
-                    ])
+                'category',
+                'images',
+                'presentations' => fn ($presentations) => $presentations
+                    ->where('is_active', true)
                     ->orderBy('sort_order')
                     ->orderBy('name'),
+                'presentations.product',
             ])
             ->orderBy('sort_order')
             ->orderBy('name')
             ->get();
 
-        return MenuCategoryResource::collection($categories);
+        foreach ($categories as $category) {
+            $category->setRelation(
+                'products',
+                $products->where('category_id', $category->category_id)->values(),
+            );
+        }
+
+        return BusinessMenuCategoryResource::collection($categories);
     }
 }

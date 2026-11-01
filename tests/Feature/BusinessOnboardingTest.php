@@ -58,14 +58,36 @@ class BusinessOnboardingTest extends TestCase
             ->assertJsonPath('welcome_message', '¡Bienvenido!')
             ->assertJsonPath('phone_numbers.1', '+525555555556');
 
-        Storage::disk('public')->assertExists($this->business->fresh()->logo_path);
-        Storage::disk('public')->assertExists($this->business->fresh()->background_path);
+        $storedLogoPath = $this->business->fresh()->logo_path;
+        $storedBackgroundPath = $this->business->fresh()->background_path;
+        Storage::disk('public')->assertExists($storedLogoPath);
+        Storage::disk('public')->assertExists($storedBackgroundPath);
+
+        $this->actingAsApi($this->owner, [])->putJson('/api/business/card', [
+            'step' => 'information',
+            'data' => [
+                'name' => 'Café Aurora',
+                'logo_url' => '[Logo](http://127.0.0.1:8000/storage/'.$storedLogoPath.')',
+                'background_url' => '[Fondo](http://127.0.0.1:8000/storage/'.$storedBackgroundPath.')',
+                'phone' => null,
+                'phone_numbers' => '+525555555555, +525555555556',
+            ],
+        ])->assertOk()
+            ->assertJsonPath('phone_numbers.0', '+525555555555')
+            ->assertJsonPath('phone_numbers.1', '+525555555556');
+
+        $this->assertSame($storedLogoPath, $this->business->fresh()->logo_path);
+        $this->assertSame($storedBackgroundPath, $this->business->fresh()->background_path);
+        Storage::disk('public')->assertExists($storedLogoPath);
+        Storage::disk('public')->assertExists($storedBackgroundPath);
 
         $this->actingAsApi($this->owner, [])->putJson('/api/business/card', [
             'step' => 'categories',
             'data' => ['category_ids' => [$category->id]],
         ])->assertOk()
             ->assertJsonPath('categories.0.name', 'Bebidas');
+        $this->assertDatabaseCount('business_categories', 1);
+        $this->assertDatabaseCount('menu_categories', 0);
 
         $this->actingAsApi($this->owner, [])->putJson('/api/business/card', [
             'step' => 'products',
@@ -84,7 +106,7 @@ class BusinessOnboardingTest extends TestCase
         $product = Product::with('images')->findOrFail($productId);
         $this->assertSame($this->business->getKey(), $product->business_id);
         $this->assertSame($category->id, $product->category_id);
-        $this->assertNotNull($product->menu_category_id);
+        $this->assertNull($product->menu_category_id);
         $this->assertSame(2, $product->sort_order);
         $this->assertTrue($product->is_available);
         $this->assertCount(1, $product->images);
