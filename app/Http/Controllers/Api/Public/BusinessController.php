@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\Business\SaveBusinessOnboardingStepRequest;
 use App\Http\Resources\BusinessResource;
 use App\Models\Business;
+use App\Models\BusinessCategory;
 use App\Models\Category;
 use App\Models\MenuCategory;
 use App\Models\Product;
@@ -19,14 +20,11 @@ use Throwable;
 
 class BusinessController extends Controller
 {
-    public function __construct(private readonly AssetService $assets)
-    {
-    }
+    public function __construct(private readonly AssetService $assets) {}
 
     public function show(string $slug): JsonResponse
     {
         $business = Business::whereSlug($slug)->firstOrFail();
-
         return response()->json(new BusinessResource($business));
     }
 
@@ -39,10 +37,10 @@ class BusinessController extends Controller
     }
 
     /** Guarda el paso indicado por `step` en el perfil del negocio autenticado. */
-    public function updateCard(SaveBusinessOnboardingStepRequest $request): JsonResponse
+    public function updateCard(Request $request): JsonResponse
     {
         $business = Business::where('user_id', $request->user()->id)->firstOrFail();
-        $data = $request->validated();
+        $data = $request->all(); //validated();
         $step = $data['step'];
         $storedPaths = [];
         $pathsToDelete = [];
@@ -51,16 +49,16 @@ class BusinessController extends Controller
             DB::transaction(function () use ($business, $data, $step, &$storedPaths, &$pathsToDelete): void {
                 switch ($step) {
                     case 'information':
-                        $this->saveInformation($business, $data['information'], $storedPaths, $pathsToDelete);
+                        $this->saveInformation($business, $data["data"], $storedPaths, $pathsToDelete);
                         break;
                     case 'categories':
-                        $this->saveCategories($business, $data['categories']['category_ids']);
+                        $this->saveCategories($business, $data["data"]['category_ids']);
                         break;
                     case 'products':
-                        $this->saveProducts($business, $data['products']['products'], $storedPaths, $pathsToDelete);
+                        $this->saveProducts($business, $data["data"]['products'], $storedPaths, $pathsToDelete);
                         break;
                     case 'design':
-                        $this->saveDesign($business, $data['design']);
+                        $this->saveDesign($business, $data["data"]);
                         break;
                 }
             });
@@ -104,7 +102,7 @@ class BusinessController extends Controller
         }
 
         if (array_key_exists('phone_numbers', $data)) {
-            $attributes['phone_numbers'] = array_values($data['phone_numbers'] ?? []);
+            $attributes['phone'] = array_values($data['phone_numbers'] ?? []);
         }
 
         if (array_key_exists('welcome_message', $data)) {
@@ -114,28 +112,32 @@ class BusinessController extends Controller
             );
         }
 
-        foreach (['logo_url' => 'logo_path', 'background_url' => 'background_path'] as $input => $column) {
-            if (! array_key_exists($input, $data)) {
-                continue;
-            }
+        if ($this->is_base64($data['logo_url']) && $this->is_base64($data['background_url'])) {
+            foreach (['logo_url' => 'logo_path', 'background_url' => 'background_path'] as $input => $column) {
+                if (! array_key_exists($input, $data)) {
+                    continue;
+                }
 
-            $currentPath = $business->{$column};
-            if ($currentPath !== null) {
-                $pathsToDelete[] = $currentPath;
-            }
+                $currentPath = $business->{$column};
+                if ($currentPath !== null) {
+                    $pathsToDelete[] = $currentPath;
+                }
 
-            if ($data[$input] === null) {
-                $attributes[$column] = null;
-                continue;
-            }
+                if ($data[$input] === null) {
+                    $attributes[$column] = null;
+                    continue;
+                }
 
-            $path = $this->assets->storePublicBase64Image(
-                $data[$input],
-                $this->assets->businessDirectory((string) $business->getKey()),
-            );
-            $storedPaths[] = $path;
-            $attributes[$column] = $path;
+                $path = $this->assets->storePublicBase64Image(
+                    $data[$input],
+                    $this->assets->businessDirectory((string) $business->getKey()),
+                );
+                $storedPaths[] = $path;
+                $attributes[$column] = $path;
+            }
         }
+
+
 
         $business->fill($attributes);
         if (blank($business->slug) || $business->name !== $previousName) {
@@ -145,16 +147,15 @@ class BusinessController extends Controller
     }
 
     /** @param list<int> $categoryIds */
-    private function saveCategories(Business $business, array $categoryIds): void
+    private function saveCategories(Business $business, array $categoryIds)
     {
         $categoryIds = array_values(array_map('intval', $categoryIds));
         $business->categories()->delete();
-
-        $menuCategories = $business->menuCategories()->whereNotNull('source_category_id');
+        /*$menuCategories = $business->menuCategories()->whereNotNull('category_id');
         if ($categoryIds !== []) {
-            $menuCategories->whereNotIn('source_category_id', $categoryIds);
+            $menuCategories->whereNotIn('category_id', $categoryIds);
         }
-        $menuCategories->update(['is_active' => false]);
+        $menuCategories->update(['is_active' => false]);*/
 
         foreach ($categoryIds as $position => $categoryId) {
             $category = Category::query()->findOrFail($categoryId);
@@ -163,24 +164,24 @@ class BusinessController extends Controller
                 'sort_order' => $position,
             ]);
 
-            $menuCategory = $business->menuCategories()
-                ->where('source_category_id', $categoryId)
+            $menuCategory = $business->categories()
+                ->where('category_id', $categoryId)
                 ->first();
 
             if ($menuCategory === null) {
-                $menuCategory = $business->menuCategories()
-                    ->whereNull('source_category_id')
+                $menuCategory = $business->categories()
+                    ->whereNull('category_id')
                     ->where('name', $category->name)
                     ->first();
             }
 
             if ($menuCategory === null) {
-                $menuCategory = new MenuCategory;
+                $menuCategory = new BusinessCategory;
                 $menuCategory->business_id = $business->getKey();
             }
 
             $menuCategory->fill([
-                'source_category_id' => $categoryId,
+                'category_id' => $categoryId,
                 'name' => $category->name,
                 'sort_order' => $position,
                 'is_active' => true,
@@ -195,21 +196,21 @@ class BusinessController extends Controller
      */
     private function saveProducts(Business $business, array $products, array &$storedPaths, array &$pathsToDelete): void
     {
-        $selectedCategoryIds = $business->categories()->pluck('category_id')->map(fn ($id): int => (int) $id)->all();
+        $selectedCategoryIds = $business->categories()->pluck('category_id')->map(fn($id): int => (int) $id)->all();
 
         foreach ($products as $index => $data) {
             if (! in_array((int) $data['category_id'], $selectedCategoryIds, true)) {
                 throw ValidationException::withMessages([
-                    "products.products.{$index}.category_id" => 'La categoría del producto debe estar seleccionada para este negocio.',
+                    "products.{$index}.category_id" => 'La categoría del producto debe estar seleccionada para este negocio.',
                 ]);
             }
 
-            $menuCategoryId = $business->menuCategories()
-                ->where('source_category_id', $data['category_id'])
+            $menuCategoryId = $business->categories()
+                ->where('category_id', $data['category_id'])
                 ->value('id');
             if ($menuCategoryId === null) {
                 throw ValidationException::withMessages([
-                    "products.products.{$index}.category_id" => 'Guarda primero las categorías del negocio antes de asignar productos.',
+                    "products.{$index}.category_id" => 'Guarda primero las categorías del negocio antes de asignar productos.',
                 ]);
             }
 
@@ -217,7 +218,7 @@ class BusinessController extends Controller
             $product = $business->products()->whereKey($id)->first();
             if ($product === null && Product::query()->whereKey($id)->exists()) {
                 throw ValidationException::withMessages([
-                    "products.products.{$index}.id" => 'El identificador del producto ya está asociado a otro negocio.',
+                    "products.{$index}.id" => 'El identificador del producto ya está asociado a otro negocio.',
                 ]);
             }
 
@@ -228,13 +229,13 @@ class BusinessController extends Controller
 
             $imagePath = $this->assets->storePublicBase64Image(
                 $data['image_url'],
-                'businesses/'.$business->getKey().'/products/'.$id,
+                'businesses/' . $business->getKey() . '/products/' . $id,
             );
             $storedPaths[] = $imagePath;
 
             $attributes = [
                 'category_id' => $data['category_id'],
-                'menu_category_id' => $menuCategoryId,
+                //'menu_category_id' => $menuCategoryId,
                 'name' => $data['name'],
                 'description' => $data['description'] ?? null,
                 'price' => $data['price'] ?? null,
@@ -260,5 +261,20 @@ class BusinessController extends Controller
     {
         $business->menu_design = array_merge($business->menu_design ?? [], $data);
         $business->save();
+    }
+
+    private function is_base64($s)
+    {
+        // Check if there are valid base64 characters
+        if (!preg_match('/^[a-zA-Z0-9\/\r\n+]*={0,2}$/', $s)) return false;
+
+        // Decode the string in strict mode and check the results
+        $decoded = base64_decode($s, true);
+        if (false === $decoded) return false;
+
+        // Encode the string again to ensure it matches the original
+        if (base64_encode($decoded) != $s) return false;
+
+        return true;
     }
 }

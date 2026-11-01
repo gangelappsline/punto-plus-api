@@ -40,7 +40,7 @@ class BusinessResource extends JsonResource
             'menu_design' => $this->menu_design ?? [],
             //'cards' => CardResource::collection($this->whenLoaded('cards')),
             'promotions' => PromotionResource::collection($this->whenLoaded('promotions')),
-            'products' => ProductResource::collection($this->whenLoaded('products')),
+            'products' => ProductResource::collection($this->products),
 
             'is_active' => (bool) $this->is_active,
             'owner' => new UserResource($this->whenLoaded('owner')),

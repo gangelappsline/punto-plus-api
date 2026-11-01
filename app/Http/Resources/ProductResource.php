@@ -24,7 +24,7 @@ class ProductResource extends JsonResource
             'price' => $this->price,
             'sort_order' => $this->sort_order,
             'is_available' => (bool) $this->is_available,
-            'images' => ProductImageResource::collection($this->whenLoaded('images')),
+            'images' => ProductImageResource::collection($this->images),
             'presentations' => ProductPresentationResource::collection($this->whenLoaded('presentations')),
             'created_at' => $this->created_at?->toIso8601String(),
             'updated_at' => $this->updated_at?->toIso8601String(),
