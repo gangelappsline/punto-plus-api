@@ -125,7 +125,12 @@ Una promoción **siempre** lleva `title` y `discount_type`
 (`percentage`, `fixed_amount`, `free_item`, `gift`); con `percentage`/`fixed_amount`
 hay que enviar `discount_value`. Existen sólo tres formas de programarla.
 
-Los días de la semana usan **ISO-8601: 1 = lunes … 7 = domingo**.
+Los días de la semana usan **ISO-8601: 1 = lunes … 7 = domingo** y son opcionales
+(sin `days_of_week` la promoción aplica todos los días).
+
+`schedule_type` también es **opcional**: si el formulario no lo envía, se deduce de los
+datos. Si no hay `starts_at`/`ends_at` ni `start_time`/`end_time`, la promoción es de
+**tiempo indefinido** y no se exigen fechas.
 
 ### 2.1 `schedule_type: "indefinite"` — tiempo indefinido
 
@@ -183,22 +188,59 @@ medianoche (`20:00` → `02:00`).
 
 | Campo | `indefinite` | `date_range` | `time_range` |
 |---|---|---|---|
-| `days_of_week` | **obligatorio** (1–7 días) | se ignora | **obligatorio** |
+| `days_of_week` | opcional (vacío = todos los días) | se ignora | opcional (vacío = todos los días) |
 | `starts_at` / `ends_at` | se ignoran | **obligatorios** | se ignoran |
 | `start_time` / `end_time` | se ignoran | se ignoran | **obligatorios** (`HH:MM`) |
 
-Los campos que no aplican al tipo se guardan en `null`. `schedule_type` omitido equivale a
-`date_range`.
+Los campos que no aplican al tipo se guardan en `null`. Si `schedule_type` se omite se
+deduce así: con fechas → `date_range`, con horas → `time_range` y sin ninguna de las dos
+→ `indefinite`.
 
-### 2.5 Editar (`PUT /api/business/promotions/{promotion}`)
+Promoción de tiempo indefinido sin fechas (el formulario del negocio):
+
+```json
+{
+  "title": "Regalo de bienvenida",
+  "description": "Muestra la promoción al registrarte",
+  "banner": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUg…",
+  "loyalty_card_id": null,
+  "discount_type": "gift",
+  "discount_value": null,
+  "code": null,
+  "terms": null,
+  "starts_at": null,
+  "ends_at": null,
+  "max_redemptions": 2,
+  "is_active": true
+}
+```
+
+### 2.5 Banner (`banner`)
+
+El banner viaja como **imagen en base64** (data URI `data:image/png;base64,…` o la cadena
+base64 sin prefijo; JPEG, PNG o WEBP hasta 4 MB — `ASSETS_MAX_KILOBYTES`). El API:
+
+1. valida el contenido con `getimagesizefromstring` (`AssetService::storePublicBase64Image()`);
+2. lo guarda en el disco **`public`**, en `promotions/{promotion_id}/banner/{uuid}.{ext}`;
+3. persiste esa ruta en `promotions.image_path`.
+
+Reglas:
+
+- `banner: null` u omitido en `PUT` conserva el banner actual.
+- Enviar un `banner` nuevo reemplaza al anterior y **borra el archivo viejo**.
+- `remove_banner: true` borra el archivo y deja `image_path` en `null`.
+- Al editar se puede reenviar la misma `image_url` que devolvió la API sin cambios.
+
+### 2.6 Editar (`PUT /api/business/promotions/{promotion}`)
 
 Sólo se actualizan los campos enviados. Si se envía `schedule_type`, hay que enviar
-también los campos de ese tipo; si no, se conserva el actual y se normalizan los campos
-de programación que sí lleguen.
+también los campos de ese tipo (fechas u horas); si no, se conserva el actual (o se deduce
+de las fechas/horas que sí lleguen) y se normalizan los campos de programación presentes.
 
-### 2.6 Qué devuelve la API
+### 2.7 Qué devuelve la API
 
 `PromotionResource` (negocio) y `Client\PromotionResource` (cliente) incluyen
+`image_url` (URL pública del banner), `image_path` (ruta en el disco `public`),
 `schedule_type`, `schedule_type_label`, `days_of_week` (+ `days_of_week_labels`),
 `start_time`, `end_time`, `starts_at`, `ends_at`, `is_available_now` y el resumen
 `schedule` (`type`, `type_label`, `days_of_week`, `start_time`, `end_time`,

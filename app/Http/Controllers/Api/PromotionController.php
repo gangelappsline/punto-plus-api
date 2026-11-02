@@ -9,18 +9,30 @@ use App\Http\Requests\Promotion\UpdatePromotionRequest;
 use App\Http\Resources\PromotionResource;
 use App\Models\LoyaltyCard;
 use App\Models\Promotion;
+use App\Services\AssetService;
+use App\Support\ImageInput;
 use App\Support\PromotionSchedule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
+use InvalidArgumentException;
+use RuntimeException;
 
 /**
  * Promociones que el negocio publica para atraer y retener clientes.
+ *
+ * El banner llega como imagen en base64 (data URI opcional): se convierte, se
+ * guarda en el disco público y su ruta queda en `image_path`.
  */
 class PromotionController extends Controller
 {
+    public function __construct(private readonly AssetService $assets)
+    {
+    }
+
     /**
      * GET /api/business/promotions
      */
@@ -73,7 +85,17 @@ class PromotionController extends Controller
 
         $data = $this->withSchedule($this->withValidatedCard($request->validated(), $business->getKey()));
 
-        $promotion = $business->promotions()->create($data);
+        $promotion = DB::transaction(function () use ($business, $data): Promotion {
+            $promotion = $business->promotions()->create($this->withoutBanner($data));
+
+            $banner = $this->bannerAttributes($data, $promotion);
+
+            if ($banner !== []) {
+                $promotion->fill($banner)->save();
+            }
+
+            return $promotion;
+        });
 
         return (new PromotionResource($promotion->load('loyaltyCard')))->response()->setStatusCode(201);
     }
@@ -100,13 +122,17 @@ class PromotionController extends Controller
             $promotion,
         );
 
-        $promotion->fill($data)->save();
+        $promotion->fill($this->withoutBanner($data));
+        $promotion->fill($this->bannerAttributes($data, $promotion));
+        $promotion->save();
 
         return new PromotionResource($promotion->load('loyaltyCard'));
     }
 
     /**
      * DELETE /api/business/promotions/{promotion}
+     *
+     * Es un borrado lógico: el banner se conserva para poder restaurarla.
      */
     public function destroy(Promotion $promotion): JsonResponse
     {
@@ -145,23 +171,16 @@ class PromotionController extends Controller
     /**
      * Normaliza la programación (días, fechas y horas) según el `schedule_type`.
      *
-     * Así la base de datos no guarda campos que no aplican: una promoción
-     * indefinida no tiene fechas y una de rango de fechas no tiene horas.
+     * Si el front no envía `schedule_type`, se deduce: sin fechas ni horas es
+     * una promoción de tiempo indefinido; con fechas, por rango de fechas; con
+     * horas, por rango de hora.
      *
      * @param  array<string, mixed>  $data
      * @return array<string, mixed>
      */
     private function withSchedule(array $data, ?Promotion $existing = null): array
     {
-        $scheduleType = PromotionScheduleType::tryFrom((string) ($data['schedule_type'] ?? ''))
-            ?? $existing?->schedule_type
-            ?? PromotionScheduleType::DateRange;
-
-        $touchesSchedule = $existing === null
-            || array_key_exists('schedule_type', $data)
-            || array_intersect(array_keys($data), ['days_of_week', 'start_time', 'end_time', 'starts_at', 'ends_at']) !== [];
-
-        if (! $touchesSchedule) {
+        if ($existing !== null && ! PromotionSchedule::touches($data)) {
             return $data;
         }
 
@@ -171,6 +190,93 @@ class PromotionController extends Controller
             $data,
         );
 
+        $scheduleType = PromotionSchedule::resolveType(
+            $data['schedule_type'] ?? null,
+            $merged,
+            $existing?->schedule_type,
+        );
+
         return array_merge($data, PromotionSchedule::attributes($merged, $scheduleType));
+    }
+
+    /**
+     * El banner no es una columna: se traduce a `image_path` después de guardar
+     * la promoción (la carpeta del disco público lleva su id).
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function withoutBanner(array $data): array
+    {
+        unset($data['banner'], $data['remove_banner']);
+
+        return $data;
+    }
+
+    /**
+     * Ruta de almacenamiento que debe quedar en `image_path` según el banner
+     * enviado (`null` si no hay nada que cambiar).
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function bannerAttributes(array $data, Promotion $promotion): array
+    {
+        if (! array_key_exists('banner', $data) && ! array_key_exists('remove_banner', $data)) {
+            return [];
+        }
+
+        if ((bool) ($data['remove_banner'] ?? false)) {
+            $this->assets->deletePublicAsset($promotion->image_path);
+
+            return ['image_path' => null];
+        }
+
+        $banner = $data['banner'] ?? null;
+
+        if (! is_string($banner) || trim($banner) === '') {
+            return [];
+        }
+
+        $banner = ImageInput::normalizeMarkdownLink(trim($banner));
+
+        if (ImageInput::isHttpUrl($banner)) {
+            // Al editar, el front puede reenviar la URL (o la ruta) del banner guardado.
+            if ($this->isCurrentBanner($banner, $promotion)) {
+                return [];
+            }
+
+            throw ValidationException::withMessages([
+                'banner' => 'El banner debe enviarse como imagen en base64 (data URI o cadena base64).',
+            ]);
+        }
+
+        try {
+            $path = $this->assets->storePublicBase64Image(
+                $banner,
+                $this->assets->promotionBannerDirectory((string) $promotion->getKey()),
+            );
+        } catch (InvalidArgumentException|RuntimeException $exception) {
+            throw ValidationException::withMessages(['banner' => $exception->getMessage()]);
+        }
+
+        $this->assets->deletePublicAsset($promotion->image_path);
+
+        return ['image_path' => $path];
+    }
+
+    /**
+     * ¿El valor enviado apunta al banner que la promoción ya tiene guardado?
+     */
+    private function isCurrentBanner(string $value, Promotion $promotion): bool
+    {
+        $currentPath = $promotion->image_path;
+
+        if (blank($currentPath)) {
+            return false;
+        }
+
+        return $value === $currentPath
+            || $value === $promotion->image_url
+            || str_ends_with($value, '/'.$currentPath);
     }
 }
