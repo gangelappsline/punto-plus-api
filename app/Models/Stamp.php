@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 #[Fillable([
     'customer_card_id', 'business_id', 'loyalty_card_id', 'registered_by',
-    'source', 'purchase_amount', 'notes', 'stamped_at', 'meta',
+    'source', 'purchase_amount', 'points_awarded', 'notes', 'stamped_at', 'meta',
 ])]
 class Stamp extends Model
 {
@@ -31,6 +31,7 @@ class Stamp extends Model
         return [
             'source' => StampSource::class,
             'purchase_amount' => 'decimal:2',
+            'points_awarded' => 'integer',
             'stamped_at' => 'datetime',
             'meta' => 'array',
         ];

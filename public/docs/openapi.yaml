@@ -16,6 +16,32 @@ info:
 
     Las respuestas de recurso se envuelven en `data` (+ `meta` y `links` al paginar). Los errores
     incluyen `message` y un código estable en `error` (`invalid_credentials`, `forbidden`, ...).
+
+    ## Tarjetas de negocio (`POST /api/business/cards`)
+
+    Existen **dos tipos** (`type`):
+
+    1. `visits` — **por cantidad de visitas**: el negocio fija cuántas visitas hacen falta
+       (`required_stamps`) dentro de un lapso (`period_type: days` + `period_days`) o sin
+       límite (`period_type: unlimited`). Cada compra suma una visita.
+    2. `spend` — **por consumo**: cada bloque de gasto suma puntos
+       (`spend_amount_per_block` → `points_per_block`, por ejemplo $100 = 10 puntos) y las
+       recompensas son niveles de puntos (`rewards[].points_required`): 200 puntos = refresco,
+       500 puntos = hamburguesa con papas.
+
+    ## Promociones (`POST /api/business/promotions`)
+
+    Existen **tres formas de programación** (`schedule_type`):
+
+    1. `indefinite` — **tiempo indefinido**: sin fecha de fin, se muestra uno o varios días
+       de la semana (`days_of_week`).
+    2. `date_range` — **por rango de fechas**: visible sólo entre `starts_at` y `ends_at`
+       (festividades) y desaparece al terminar.
+    3. `time_range` — **por rango de hora**: uno o varios días de la semana dentro de
+       `start_time`–`end_time` (hora feliz; la franja puede cruzar la medianoche).
+
+    Los días de la semana usan ISO-8601: **1 = lunes … 7 = domingo**. Los request bodies
+    incluyen ejemplos completos para cada variante.
   contact:
     name: Punto Plus
     email: hola@puntoplus.test
@@ -524,7 +550,7 @@ paths:
         - $ref: '#/components/parameters/CustomerCardId'
       responses:
         '200':
-          description: Recompensas del programa con `can_redeem` y `missing_stamps`
+          description: Recompensas del programa indicando si el cliente ya puede canjearlas
           content:
             application/json:
               schema:
@@ -537,8 +563,13 @@ paths:
                         - $ref: '#/components/schemas/Reward'
                         - type: object
                           properties:
+                            threshold: { type: integer, nullable: true, description: 'Umbral en la unidad del programa' }
+                            threshold_unit: { type: string, enum: [visits, points] }
                             can_redeem: { type: boolean }
-                            missing_stamps: { type: integer }
+                            missing_units: { type: integer, description: 'Visitas o puntos que faltan para esta recompensa' }
+                            missing_stamps: { type: integer, description: 'Compatibilidad: sólo tarjetas `visits` (0 en las de puntos)' }
+                            missing_points: { type: integer, description: 'Sólo tarjetas `spend`' }
+                  progress_unit: { type: string, enum: [visits, points] }
                   progress: { $ref: '#/components/schemas/Progress' }
 
   /api/customer/cards/{customerCard}/qr:
@@ -659,11 +690,18 @@ paths:
         negocios con los que el cliente tiene o ha tenido tarjeta. Las tarjetas de las que se
         dio de baja cuentan: la baja es un borrado lógico, así que el histórico sigue dando acceso
         a las promociones del negocio.
+
+        Cada promoción indica cómo se muestra (`schedule_type`: `indefinite`, `date_range` o
+        `time_range`) y `is_available_now` dice si aplica en este momento. Usa
+        `available_now=true` para quedarte sólo con las vigentes ahora mismo (por ejemplo,
+        la hora feliz de 18:00 a 21:00).
       security: [{ OAuth2: [] }]
       parameters:
         - { name: business_id, in: query, description: Limita el listado a un negocio, schema: { type: string, format: uuid } }
         - { name: search, in: query, description: Busca en título y descripción, schema: { type: string } }
         - { name: discount_type, in: query, description: Tipo de descuento, schema: { type: string, enum: [percentage, fixed_amount, free_item, gift] } }
+        - { name: schedule_type, in: query, description: 'Forma de programación del aviso', schema: { $ref: '#/components/schemas/PromotionScheduleType' } }
+        - { name: available_now, in: query, description: 'Si es `true`, sólo devuelve las que aplican en este momento (día, fecha y hora)', schema: { type: boolean } }
         - $ref: '#/components/parameters/PerPage'
         - $ref: '#/components/parameters/Page'
       responses:
@@ -879,6 +917,8 @@ paths:
       parameters:
         - { name: search, in: query, schema: { type: string } }
         - { name: is_active, in: query, schema: { type: boolean } }
+        - { name: type, in: query, description: 'Filtra por tipo de tarjeta', schema: { $ref: '#/components/schemas/LoyaltyCardType' } }
+        - { name: period_type, in: query, description: 'Filtra por vigencia del ciclo', schema: { $ref: '#/components/schemas/CardPeriodType' } }
         - $ref: '#/components/parameters/PerPage'
         - $ref: '#/components/parameters/Page'
       responses:
@@ -897,7 +937,20 @@ paths:
         '403': { $ref: '#/components/responses/Forbidden' }
     post:
       tags: [Negocio]
-      summary: Crear una tarjeta (opcionalmente con recompensas)
+      summary: Crear una tarjeta de fidelidad (por visitas o por consumo)
+      description: |
+        Existen **dos tipos de tarjeta** y `type` decide qué campos hay que enviar:
+
+        | `type` | Cómo avanza el cliente | Campos obligatorios | Recompensas |
+        | --- | --- | --- | --- |
+        | `visits` (por defecto) | Suma **1 visita** por compra | `required_stamps` (si se omite: `CARD_DEFAULT_REQUIRED_STAMPS`, 10) | `rewards[].required_stamps` |
+        | `spend` | Suma **puntos** por cada bloque de gasto | `spend_amount_per_block`, `points_per_block` y al menos 1 recompensa con `points_required` | varios niveles de puntos |
+
+        **Vigencia del ciclo** (aplica a los dos tipos): `period_type: unlimited`
+        (se completa cuando el cliente quiera) o `period_type: days` + `period_days`
+        (el ciclo caduca y el contador vuelve a cero).
+
+        Ejemplos completos: *tarjetaPorVisitas* y *tarjetaPorConsumo*.
       security: [{ OAuth2: [] }]
       requestBody:
         required: true
@@ -907,32 +960,85 @@ paths:
               type: object
               required: [name]
               properties:
-                name: { type: string, maxLength: 150, example: Club del café }
-                description: { type: string, nullable: true }
-                required_stamps: { type: integer, minimum: 1, maximum: 100, example: 6 }
-                reward_description: { type: string, nullable: true }
-                terms: { type: string, nullable: true }
-                primary_color: { type: string, nullable: true }
+                name: { type: string, maxLength: 120, example: Club del café }
+                description: { type: string, maxLength: 1000, nullable: true }
+                type: { $ref: '#/components/schemas/LoyaltyCardType' }
+
+                # --- Sólo tarjetas por visitas ---
+                required_stamps: { type: integer, minimum: 1, maximum: 100, nullable: true, description: 'Sólo `type: visits`. Visitas necesarias para la recompensa del ciclo.', example: 6 }
+
+                # --- Sólo tarjetas por consumo ---
+                spend_amount_per_block: { type: number, format: float, minimum: 1, maximum: 999999.99, nullable: true, description: 'Sólo `type: spend`. Monto de consumo que suma un bloque de puntos.', example: 100 }
+                points_per_block: { type: integer, minimum: 1, maximum: 10000, nullable: true, description: 'Sólo `type: spend`. Puntos que otorga cada bloque.', example: 10 }
+                currency: { type: string, minLength: 3, maxLength: 3, nullable: true, default: MXN, example: MXN }
+
+                # --- Vigencia del ciclo ---
+                period_type: { $ref: '#/components/schemas/CardPeriodType' }
+                period_days: { type: integer, minimum: 1, maximum: 3650, nullable: true, description: 'Obligatorio si `period_type: days`.', example: 30 }
+
+                reward_description: { type: string, maxLength: 180, nullable: true }
+                terms: { type: string, maxLength: 2000, nullable: true }
+                primary_color: { type: string, nullable: true, example: '#F59E0B' }
                 secondary_color: { type: string, nullable: true }
                 text_color: { type: string, nullable: true }
                 is_active: { type: boolean, default: true }
                 is_public: { type: boolean, default: true }
-                expires_at: { type: string, format: date-time, nullable: true }
-                inherit_business_branding: { type: boolean, default: true, description: Hereda logo, fondo e icono del negocio }
-                settings: { type: object, additionalProperties: true }
+                expires_at: { type: string, format: date-time, nullable: true, description: Fecha en la que el programa deja de estar disponible }
+                inherit_business_branding: { type: boolean, default: true, description: Hereda logo, fondo, icono y colores del negocio }
+                settings:
+                  type: object
+                  additionalProperties: true
+                  properties:
+                    stamp_icon: { type: string, enum: [star, heart, coffee, leaf, bolt, crown, circle] }
+                    card_shape: { type: string, enum: [rounded, square, pill] }
+                    welcome_message: { type: string, maxLength: 180 }
+                    stamps_lifetime_days: { type: integer, nullable: true }
                 rewards:
                   type: array
+                  maxItems: 20
+                  description: 'Recompensas iniciales. Obligatorio (mínimo 1) cuando `type: spend`; en `visits` es opcional.'
                   items:
                     type: object
                     required: [name]
                     properties:
-                      name: { type: string }
-                      description: { type: string, nullable: true }
-                      reward_type: { type: string, enum: [free_product, discount, gift, points, custom] }
+                      name: { type: string, maxLength: 120, example: Café gratis }
+                      description: { type: string, maxLength: 500, nullable: true }
+                      reward_type: { type: string, enum: [free_product, discount, gift, experience] }
                       value: { type: number, nullable: true }
-                      required_stamps: { type: integer, minimum: 1, maximum: 100 }
-                      stock: { type: integer, nullable: true }
-                      is_active: { type: boolean }
+                      required_stamps: { type: integer, minimum: 1, maximum: 100, nullable: true, description: 'Sólo tarjetas `visits`. Si se omite se usa el de la tarjeta.' }
+                      points_required: { type: integer, minimum: 1, maximum: 1000000, nullable: true, description: 'Sólo tarjetas `spend`. Nivel de puntos que desbloquea la recompensa.' }
+                      stock: { type: integer, nullable: true, description: 'null = stock ilimitado' }
+                      is_active: { type: boolean, default: true }
+            examples:
+              tarjetaPorVisitas:
+                summary: Por cantidad de visitas (6 visitas en un lapso de 30 días)
+                value:
+                  name: Club del café
+                  type: visits
+                  required_stamps: 6
+                  period_type: days
+                  period_days: 30
+                  reward_description: Café de especialidad gratis
+                  rewards:
+                    - name: Croissant gratis
+                      required_stamps: 3
+                    - name: Café gratis
+                      required_stamps: 6
+              tarjetaPorConsumo:
+                summary: Por consumo (cada $100 de compra = 10 puntos)
+                value:
+                  name: Puntos Aurora
+                  type: spend
+                  spend_amount_per_block: 100
+                  points_per_block: 10
+                  currency: MXN
+                  period_type: unlimited
+                  reward_description: Canjea tus puntos por producto
+                  rewards:
+                    - name: Refresco 600 ml
+                      points_required: 200
+                    - name: Hamburguesa con papas
+                      points_required: 500
       responses:
         '201':
           description: Tarjeta creada con sus recompensas
@@ -964,6 +1070,15 @@ paths:
     put:
       tags: [Negocio]
       summary: Editar una tarjeta
+      description: |
+        Todos los campos son opcionales: se actualiza sólo lo que se envía.
+
+        `type` **sólo** puede cambiarse mientras la tarjeta no tenga clientes ni
+        recompensas (el progreso acumulado depende del tipo). Al cambiar a
+        `spend` se limpia `required_stamps` y, al volver a `visits`, se limpia la
+        configuración de puntos.
+
+        Si se envía `period_days` sin `period_type`, el ciclo pasa a `days`.
       security: [{ OAuth2: [] }]
       requestBody:
         required: true
@@ -972,11 +1087,17 @@ paths:
             schema:
               type: object
               properties:
-                name: { type: string }
-                description: { type: string, nullable: true }
-                required_stamps: { type: integer, minimum: 1, maximum: 100 }
-                reward_description: { type: string, nullable: true }
-                terms: { type: string, nullable: true }
+                name: { type: string, maxLength: 120 }
+                description: { type: string, maxLength: 1000, nullable: true }
+                type: { $ref: '#/components/schemas/LoyaltyCardType' }
+                required_stamps: { type: integer, minimum: 1, maximum: 100, description: 'Sólo tarjetas `visits`.' }
+                spend_amount_per_block: { type: number, format: float, minimum: 1, nullable: true, description: 'Sólo tarjetas `spend`.' }
+                points_per_block: { type: integer, minimum: 1, maximum: 10000, nullable: true, description: 'Sólo tarjetas `spend`.' }
+                currency: { type: string, minLength: 3, maxLength: 3, nullable: true, example: MXN }
+                period_type: { $ref: '#/components/schemas/CardPeriodType' }
+                period_days: { type: integer, minimum: 1, maximum: 3650, nullable: true }
+                reward_description: { type: string, maxLength: 180, nullable: true }
+                terms: { type: string, maxLength: 2000, nullable: true }
                 primary_color: { type: string, nullable: true }
                 secondary_color: { type: string, nullable: true }
                 text_color: { type: string, nullable: true }
@@ -984,6 +1105,14 @@ paths:
                 is_public: { type: boolean }
                 expires_at: { type: string, format: date-time, nullable: true }
                 settings: { type: object, additionalProperties: true }
+            examples:
+              pasarAConsumo:
+                summary: Convertir la tarjeta a puntos por consumo
+                value:
+                  type: spend
+                  spend_amount_per_block: 100
+                  points_per_block: 10
+                  currency: MXN
       responses:
         '200':
           description: Tarjeta actualizada
@@ -1133,7 +1262,15 @@ paths:
                     items: { $ref: '#/components/schemas/Reward' }
     post:
       tags: [Negocio]
-      summary: Crear una recompensa
+      summary: Crear una recompensa (nivel de la tarjeta)
+      description: |
+        El umbral se mide en la unidad del tipo de tarjeta:
+
+        - tarjeta `visits` → `required_stamps` (si se omite se usa el de la tarjeta);
+        - tarjeta `spend` → `points_required` (**obligatorio**) y las recompensas
+          funcionan como niveles: 200 puntos → refresco, 500 puntos → hamburguesa.
+
+        No puede haber dos recompensas con el mismo umbral.
       security: [{ OAuth2: [] }]
       requestBody:
         required: true
@@ -1143,13 +1280,21 @@ paths:
               type: object
               required: [name]
               properties:
-                name: { type: string, example: Café gratis }
-                description: { type: string, nullable: true }
-                reward_type: { type: string, enum: [free_product, discount, gift, points, custom] }
+                name: { type: string, maxLength: 120, example: Café gratis }
+                description: { type: string, maxLength: 500, nullable: true }
+                reward_type: { type: string, enum: [free_product, discount, gift, experience] }
                 value: { type: number, nullable: true }
-                required_stamps: { type: integer, minimum: 1, maximum: 100 }
+                required_stamps: { type: integer, minimum: 1, maximum: 100, nullable: true, description: 'Tarjetas `visits`.' }
+                points_required: { type: integer, minimum: 1, maximum: 1000000, nullable: true, description: 'Tarjetas `spend` (obligatorio en ellas).', example: 200 }
                 stock: { type: integer, nullable: true, description: 'null = stock ilimitado' }
-                is_active: { type: boolean }
+                is_active: { type: boolean, default: true }
+            examples:
+              nivelDePuntos:
+                summary: Nivel por puntos
+                value: { name: Refresco 600 ml, points_required: 200, reward_type: free_product }
+              nivelDeVisitas:
+                summary: Nivel por visitas
+                value: { name: Café gratis, required_stamps: 6, reward_type: free_product }
       responses:
         '201':
           description: Recompensa creada
@@ -1167,6 +1312,7 @@ paths:
     put:
       tags: [Negocio]
       summary: Editar una recompensa
+      description: Sólo se actualizan los campos enviados. El umbral debe ir en la unidad de la tarjeta (`required_stamps` o `points_required`).
       security: [{ OAuth2: [] }]
       requestBody:
         required: true
@@ -1175,11 +1321,12 @@ paths:
             schema:
               type: object
               properties:
-                name: { type: string }
-                description: { type: string, nullable: true }
-                reward_type: { type: string, enum: [free_product, discount, gift, points, custom] }
+                name: { type: string, maxLength: 120 }
+                description: { type: string, maxLength: 500, nullable: true }
+                reward_type: { type: string, enum: [free_product, discount, gift, experience] }
                 value: { type: number, nullable: true }
-                required_stamps: { type: integer, minimum: 1, maximum: 100 }
+                required_stamps: { type: integer, minimum: 1, maximum: 100, nullable: true, description: 'Tarjetas `visits`.' }
+                points_required: { type: integer, minimum: 1, maximum: 1000000, nullable: true, description: 'Tarjetas `spend`.' }
                 stock: { type: integer, nullable: true }
                 is_active: { type: boolean }
       responses:
@@ -1213,6 +1360,8 @@ paths:
       parameters:
         - { name: is_active, in: query, schema: { type: boolean } }
         - { name: loyalty_card_id, in: query, schema: { type: string, format: uuid } }
+        - { name: schedule_type, in: query, description: 'Filtra por forma de programación', schema: { $ref: '#/components/schemas/PromotionScheduleType' } }
+        - { name: available_now, in: query, description: 'Sólo las que se muestran en este momento (tipo, día, fecha y hora)', schema: { type: boolean } }
         - { name: search, in: query, schema: { type: string } }
         - $ref: '#/components/parameters/PerPage'
         - $ref: '#/components/parameters/Page'
@@ -1231,7 +1380,25 @@ paths:
                         items: { $ref: '#/components/schemas/Promotion' }
     post:
       tags: [Negocio]
-      summary: Crear una promoción
+      summary: Crear una promoción (aviso)
+      description: |
+        La forma de mostrarse la decide `schedule_type`:
+
+        | `schedule_type` | Campos obligatorios | Ejemplo |
+        | --- | --- | --- |
+        | `indefinite` | `days_of_week` | Aviso permanente de lunes a viernes |
+        | `date_range` | `starts_at`, `ends_at` | Promoción navideña del 1 al 24 de diciembre |
+        | `time_range` | `days_of_week`, `start_time`, `end_time` | Hora feliz viernes y sábado de 18:00 a 21:00 |
+
+        - `days_of_week` usa ISO-8601: **1 = lunes … 7 = domingo** (arreglo de 1 a 7 días).
+        - `start_time`/`end_time` van en formato **HH:MM** (24 h) y la franja puede
+          cruzar la medianoche (por ejemplo `20:00` → `02:00`).
+        - Los campos que no aplican a la programación elegida se ignoran y se guardan
+          en `null` (una promoción indefinida no tiene fechas).
+        - `is_available_now` y `schedule.is_available_now` de la respuesta ya evalúan
+          día, fecha y hora con la hora del servidor.
+
+        Ejemplos completos: *indefinida*, *rangoDeFechas* y *rangoDeHora*.
       security: [{ OAuth2: [] }]
       requestBody:
         required: true
@@ -1239,19 +1406,57 @@ paths:
           application/json:
             schema:
               type: object
-              required: [title]
+              required: [title, discount_type]
               properties:
-                title: { type: string, example: 2x1 en cafés los martes }
-                description: { type: string, nullable: true }
-                loyalty_card_id: { type: string, format: uuid, nullable: true }
-                discount_type: { type: string, enum: [percentage, fixed, gift, points] }
-                discount_value: { type: number, nullable: true }
-                code: { type: string, nullable: true, example: MARTES2X1 }
-                terms: { type: string, nullable: true }
-                starts_at: { type: string, format: date-time, nullable: true }
-                ends_at: { type: string, format: date-time, nullable: true }
+                title: { type: string, maxLength: 150, example: 2x1 en cafés los martes }
+                description: { type: string, maxLength: 2000, nullable: true }
+                terms: { type: string, maxLength: 2000, nullable: true }
+                loyalty_card_id: { type: string, format: uuid, nullable: true, description: 'Tarjeta a la que aplica (opcional)' }
+                discount_type: { type: string, enum: [percentage, fixed_amount, free_item, gift] }
+                discount_value: { type: number, nullable: true, description: 'Obligatorio si el descuento es `percentage` o `fixed_amount`.' }
+                code: { type: string, maxLength: 32, nullable: true, example: MARTES2X1 }
+
+                # --- Programación ---
+                schedule_type: { $ref: '#/components/schemas/PromotionScheduleType' }
+                days_of_week: { type: array, items: { type: integer, minimum: 1, maximum: 7 }, minItems: 1, maxItems: 7, description: 'ISO-8601: 1 = lunes … 7 = domingo. Obligatorio en `indefinite` y `time_range`.', example: [5, 6] }
+                start_time: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$', nullable: true, description: 'HH:MM (24 h). Obligatorio en `time_range`.', example: '18:00' }
+                end_time: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$', nullable: true, description: 'HH:MM (24 h). Puede ser menor que `start_time` si cruza medianoche.', example: '21:00' }
+                starts_at: { type: string, format: date, nullable: true, description: 'Obligatorio en `date_range`. Se guarda al inicio del día.' }
+                ends_at: { type: string, format: date, nullable: true, description: 'Obligatorio en `date_range`. Se guarda al final del día.' }
+
                 max_redemptions: { type: integer, nullable: true }
-                is_active: { type: boolean }
+                is_active: { type: boolean, default: true }
+            examples:
+              indefinida:
+                summary: Tiempo indefinido (sólo días de la semana)
+                value:
+                  title: Martes de 2x1 en café
+                  description: Todos los martes, todo el día
+                  discount_type: percentage
+                  discount_value: 50
+                  schedule_type: indefinite
+                  days_of_week: [2]
+              rangoDeFechas:
+                summary: Por rango de fechas (temporada)
+                value:
+                  title: Promoción navideña
+                  description: 20% en toda la tienda
+                  discount_type: percentage
+                  discount_value: 20
+                  code: NAVIDAD20
+                  schedule_type: date_range
+                  starts_at: '2026-12-01'
+                  ends_at: '2026-12-24'
+              rangoDeHora:
+                summary: Por rango de hora (hora feliz)
+                value:
+                  title: Hora feliz
+                  description: 2x1 en bebidas
+                  discount_type: free_item
+                  schedule_type: time_range
+                  days_of_week: [5, 6]
+                  start_time: '18:00'
+                  end_time: '21:00'
       responses:
         '201':
           description: Promoción creada
@@ -1282,6 +1487,11 @@ paths:
     put:
       tags: [Negocio]
       summary: Editar una promoción
+      description: |
+        Sólo se actualizan los campos enviados. Si se envía `schedule_type`, hay que
+        enviar también los campos que ese tipo necesita (`days_of_week`, fechas o
+        horas); si no se envía `schedule_type`, se conserva el actual y se normalizan
+        los campos de programación que sí se envíen.
       security: [{ OAuth2: [] }]
       requestBody:
         required: true
@@ -1290,17 +1500,29 @@ paths:
             schema:
               type: object
               properties:
-                title: { type: string }
-                description: { type: string, nullable: true }
+                title: { type: string, maxLength: 150 }
+                description: { type: string, maxLength: 2000, nullable: true }
+                terms: { type: string, maxLength: 2000, nullable: true }
                 loyalty_card_id: { type: string, format: uuid, nullable: true }
-                discount_type: { type: string, enum: [percentage, fixed, gift, points] }
+                discount_type: { type: string, enum: [percentage, fixed_amount, free_item, gift] }
                 discount_value: { type: number, nullable: true }
-                code: { type: string, nullable: true }
-                terms: { type: string, nullable: true }
-                starts_at: { type: string, format: date-time, nullable: true }
-                ends_at: { type: string, format: date-time, nullable: true }
+                code: { type: string, maxLength: 32, nullable: true }
+                schedule_type: { $ref: '#/components/schemas/PromotionScheduleType' }
+                days_of_week: { type: array, items: { type: integer, minimum: 1, maximum: 7 }, minItems: 1, maxItems: 7, description: 'Obligatorio al pasar a `indefinite` o `time_range`.' }
+                start_time: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$', nullable: true, description: 'HH:MM (24 h). Obligatorio al pasar a `time_range`.' }
+                end_time: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$', nullable: true }
+                starts_at: { type: string, format: date, nullable: true, description: 'Obligatorio al pasar a `date_range`.' }
+                ends_at: { type: string, format: date, nullable: true, description: 'No puede ser anterior a `starts_at`.' }
                 max_redemptions: { type: integer, nullable: true }
                 is_active: { type: boolean }
+            examples:
+              pasarAHoraFeliz:
+                summary: Convertir la promoción en hora feliz
+                value:
+                  schedule_type: time_range
+                  days_of_week: [4, 5]
+                  start_time: '19:00'
+                  end_time: '22:00'
       responses:
         '200':
           description: Promoción actualizada
@@ -1330,8 +1552,16 @@ paths:
       description: |
         Valida que la tarjeta pertenece al negocio y está activa, aplica el *throttle*
         anti-fraude (`CARD_STAMP_THROTTLE_SECONDS`) y el máximo diario
-        (`CARD_MAX_STAMPS_PER_DAY`), registra el sello y actualiza el progreso dentro de
-        una transacción. Si la tarjeta llega a `required_stamps` pasa a `completed`.
+        (`CARD_MAX_STAMPS_PER_DAY`), registra la compra y actualiza el progreso dentro de
+        una transacción.
+
+        - Tarjeta `visits`: suma una visita; al llegar a `required_stamps` pasa a `completed`.
+        - Tarjeta `spend`: `purchase_amount` es **obligatorio** y debe alcanzar al menos un
+          bloque de gasto. Los puntos se calculan con la regla de la tarjeta
+          (`floor(monto / spend_amount_per_block) * points_per_block`) y se devuelven en
+          `data.points_awarded`.
+
+        Si el ciclo de la tarjeta había caducado (`period_days`), se reinicia antes de sumar.
       security: [{ OAuth2: [] }]
       requestBody:
         required: true
@@ -1342,7 +1572,7 @@ paths:
               required: [code]
               properties:
                 code: { type: string, description: 'Contenido del QR del cliente (JSON, URL o texto)', example: AB12CD34EF }
-                purchase_amount: { type: number, format: float, nullable: true, example: 4.5 }
+                purchase_amount: { type: number, format: float, nullable: true, description: 'Monto de la compra. Obligatorio en tarjetas por consumo y debe cubrir al menos un bloque de gasto.', example: 250 }
                 notes: { type: string, nullable: true }
                 stamped_at: { type: string, format: date-time, nullable: true }
                 source: { type: string, enum: [scan, manual, import, adjustment] }
@@ -1359,14 +1589,19 @@ paths:
                   data: { $ref: '#/components/schemas/Stamp' }
                   customer_card:
                     type: object
+                    description: Resumen del progreso después de la compra.
                     properties:
                       id: { type: string, format: uuid }
                       code: { type: string }
+                      progress_unit: { type: string, enum: [visits, points] }
                       stamps_count: { type: integer }
                       required_stamps: { type: integer }
+                      points_count: { type: integer }
+                      total_points_earned: { type: integer }
                       progress_percentage: { type: number }
-                      status: { type: string }
-                      reward_available: { type: boolean }
+                      progress: { $ref: '#/components/schemas/Progress' }
+                      status: { type: string, enum: [active, completed, expired, blocked] }
+                      reward_available: { type: boolean, description: 'En tarjetas por consumo: hay alguna recompensa alcanzada con sus puntos' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
@@ -1992,6 +2227,55 @@ components:
         customers_count: { type: integer, nullable: true }
         created_at: { type: string, format: date-time }
 
+    LoyaltyCardType:
+      type: string
+      enum: [visits, spend]
+      description: |
+        Tipo de tarjeta de fidelidad:
+
+        - `visits`: el cliente acumula **visitas** (1 por compra) y al llegar a
+          `required_stamps` obtiene la recompensa del ciclo.
+        - `spend`: el cliente acumula **puntos** según el monto de su consumo
+          (`spend_amount_per_block` → `points_per_block`) y canjea por niveles
+          (`rewards[].points_required`).
+      example: visits
+
+    CardPeriodType:
+      type: string
+      enum: [unlimited, days]
+      description: |
+        Vigencia del ciclo:
+
+        - `unlimited`: la tarjeta se completa cuando el cliente quiera.
+        - `days`: el ciclo caduca en `period_days` días y, al volver a comprar, el
+          contador se reinicia y empieza un ciclo nuevo.
+      example: unlimited
+
+    PromotionScheduleType:
+      type: string
+      enum: [indefinite, date_range, time_range]
+      description: |
+        Cómo se muestra una promoción:
+
+        - `indefinite`: sin fecha de fin; sólo `days_of_week`.
+        - `date_range`: visible entre `starts_at` y `ends_at` (temporadas).
+        - `time_range`: `days_of_week` dentro de `start_time`–`end_time` (hora feliz).
+      example: date_range
+
+    PromotionSchedule:
+      type: object
+      description: Resumen de la programación tal como quedó guardada.
+      properties:
+        type: { $ref: '#/components/schemas/PromotionScheduleType' }
+        type_label: { type: string, example: Por rango de fechas }
+        days_of_week: { type: array, items: { type: integer, minimum: 1, maximum: 7 }, example: [5, 6] }
+        days_of_week_labels: { type: array, items: { type: string }, example: [Viernes, Sábado] }
+        start_time: { type: string, nullable: true, example: '18:00' }
+        end_time: { type: string, nullable: true, example: '21:00' }
+        starts_at: { type: string, format: date-time, nullable: true }
+        ends_at: { type: string, format: date-time, nullable: true }
+        is_available_now: { type: boolean }
+
     LoyaltyCard:
       type: object
       properties:
@@ -2000,7 +2284,17 @@ components:
         name: { type: string, example: Club del café }
         slug: { type: string }
         description: { type: string, nullable: true }
-        required_stamps: { type: integer, example: 6 }
+        type: { $ref: '#/components/schemas/LoyaltyCardType' }
+        type_label: { type: string, example: Por cantidad de visitas }
+        progress_unit: { type: string, enum: [visits, points] }
+        reward_threshold_field: { type: string, enum: [required_stamps, points_required], description: 'Campo de cada recompensa que define el umbral' }
+        required_stamps: { type: integer, nullable: true, description: 'Sólo tarjetas `visits`', example: 6 }
+        currency: { type: string, nullable: true, example: MXN, description: 'Sólo tarjetas `spend`' }
+        spend_amount_per_block: { type: number, nullable: true, example: 100, description: 'Sólo tarjetas `spend`' }
+        points_per_block: { type: integer, nullable: true, example: 10, description: 'Sólo tarjetas `spend`' }
+        period_type: { $ref: '#/components/schemas/CardPeriodType' }
+        period_type_label: { type: string }
+        period_days: { type: integer, nullable: true, example: 30 }
         reward_description: { type: string, nullable: true }
         terms: { type: string, nullable: true }
         logo_url: { type: string, nullable: true }
@@ -2034,24 +2328,47 @@ components:
         name: { type: string, example: Café gratis }
         description: { type: string, nullable: true }
         image_url: { type: string, nullable: true }
-        reward_type: { type: string, enum: [free_product, discount, gift, points, custom] }
+        reward_type: { type: string, enum: [free_product, discount, gift, experience] }
         reward_type_label: { type: string }
         value: { type: number, nullable: true }
-        required_stamps: { type: integer }
+        required_stamps: { type: integer, nullable: true, description: 'Tarjetas `visits`' }
+        points_required: { type: integer, nullable: true, description: 'Tarjetas `spend`' }
+        threshold: { type: integer, nullable: true, description: 'Umbral en la unidad del programa (visitas o puntos)' }
+        threshold_unit: { type: string, enum: [visits, points] }
         stock: { type: integer, nullable: true }
         has_stock: { type: boolean }
         is_active: { type: boolean }
-        redemptions_count: { type: integer, nullable: true }
+        redemptions_count: { type: integer }
+        loyalty_card: { nullable: true, allOf: [{ $ref: '#/components/schemas/LoyaltyCard' }] }
         created_at: { type: string, format: date-time }
 
     Progress:
       type: object
+      description: |
+        Progreso del cliente en la tarjeta. `unit` dice si avanza por `visits` o por
+        `points`; `current`/`required`/`remaining`/`percentage` ya están en esa unidad.
+        Las claves `stamps_*` se conservan por compatibilidad con las tarjetas por visitas.
       properties:
+        unit: { type: string, enum: [visits, points] }
+        current: { type: integer, description: 'Visitas o puntos acumulados' }
+        required: { type: integer, nullable: true, description: 'Meta: visitas del ciclo o puntos del siguiente nivel' }
+        remaining: { type: integer, nullable: true }
+        percentage: { type: number, example: 33.33 }
+        completed: { type: boolean }
+        points_count: { type: integer, nullable: true, description: 'Sólo tarjetas `spend`' }
+        total_points_earned: { type: integer, nullable: true, description: 'Sólo tarjetas `spend`' }
+        next_reward:
+          type: object
+          nullable: true
+          properties:
+            id: { type: string, format: uuid }
+            name: { type: string }
+            threshold: { type: integer }
+        available_rewards_count: { type: integer, description: 'Recompensas que el cliente ya puede canjear con su saldo' }
         stamps_count: { type: integer }
         required_stamps: { type: integer }
         stamps_remaining: { type: integer }
         progress_percentage: { type: number, example: 33.33 }
-        completed: { type: boolean }
 
     CustomerCard:
       type: object
@@ -2061,11 +2378,22 @@ components:
         user_id: { type: integer }
         loyalty_card_id: { type: string, format: uuid }
         business_id: { type: string, format: uuid }
+        progress_unit: { type: string, enum: [visits, points] }
         stamps_count: { type: integer }
         required_stamps: { type: integer }
         stamps_remaining: { type: integer }
+        points_count: { type: integer, description: 'Saldo de puntos (tarjetas `spend`)' }
+        total_points_earned: { type: integer }
         progress_percentage: { type: number }
         progress: { $ref: '#/components/schemas/Progress' }
+        cycle:
+          type: object
+          description: Vigencia del ciclo cuando la tarjeta define `period_days`.
+          properties:
+            started_at: { type: string, format: date-time, nullable: true }
+            expires_at: { type: string, format: date-time, nullable: true }
+            days: { type: integer, nullable: true }
+            expired: { type: boolean }
         status: { type: string, enum: [active, completed, expired, blocked] }
         status_label: { type: string }
         rewards_earned: { type: integer }
@@ -2098,7 +2426,8 @@ components:
         loyalty_card_id: { type: string, format: uuid }
         source: { type: string, enum: [scan, manual, import, adjustment] }
         source_label: { type: string }
-        purchase_amount: { type: number, nullable: true, example: 4.5 }
+        purchase_amount: { type: number, nullable: true, example: 250 }
+        points_awarded: { type: integer, description: 'Puntos generados por la compra (0 en tarjetas por visitas)', example: 20 }
         notes: { type: string, nullable: true }
         stamped_at: { type: string, format: date-time }
         registered_by: { nullable: true, allOf: [{ $ref: '#/components/schemas/User' }] }
@@ -2115,17 +2444,26 @@ components:
         description: { type: string, nullable: true }
         image_url: { type: string, nullable: true }
         terms: { type: string, nullable: true }
-        discount_type: { type: string, enum: [percentage, fixed, gift, points] }
+        discount_type: { type: string, enum: [percentage, fixed_amount, free_item, gift] }
         discount_type_label: { type: string }
         discount_value: { type: number, nullable: true }
         code: { type: string, nullable: true }
+        schedule_type: { $ref: '#/components/schemas/PromotionScheduleType' }
+        schedule_type_label: { type: string, example: Por rango de hora }
+        schedule: { $ref: '#/components/schemas/PromotionSchedule' }
+        days_of_week: { type: array, items: { type: integer, minimum: 1, maximum: 7 }, example: [5, 6] }
+        days_of_week_labels: { type: array, items: { type: string }, example: [Viernes, Sábado] }
+        start_time: { type: string, nullable: true, example: '18:00' }
+        end_time: { type: string, nullable: true, example: '21:00' }
         starts_at: { type: string, format: date-time, nullable: true }
         ends_at: { type: string, format: date-time, nullable: true }
         is_active: { type: boolean }
-        is_active_now: { type: boolean }
+        is_active_now: { type: boolean, description: 'Alias de `is_available_now` (compatibilidad)' }
+        is_available_now: { type: boolean, description: 'true si la promoción aplica ahora (tipo, día, fecha y hora)' }
         max_redemptions: { type: integer, nullable: true }
         redemptions_count: { type: integer }
         business: { nullable: true, allOf: [{ $ref: '#/components/schemas/Business' }] }
+        loyalty_card: { nullable: true, allOf: [{ $ref: '#/components/schemas/LoyaltyCard' }] }
         created_at: { type: string, format: date-time }
 
     BusinessCategory:
@@ -2187,10 +2525,18 @@ components:
         discount_type_label: { type: string }
         discount_value: { type: number, nullable: true }
         code: { type: string, nullable: true }
+        schedule_type: { $ref: '#/components/schemas/PromotionScheduleType' }
+        schedule_type_label: { type: string, example: Por rango de hora }
+        schedule: { $ref: '#/components/schemas/PromotionSchedule' }
+        days_of_week: { type: array, items: { type: integer, minimum: 1, maximum: 7 } }
+        days_of_week_labels: { type: array, items: { type: string }, example: [Viernes, Sábado] }
+        start_time: { type: string, nullable: true, example: '18:00' }
+        end_time: { type: string, nullable: true, example: '21:00' }
         starts_at: { type: string, format: date-time, nullable: true }
         ends_at: { type: string, format: date-time, nullable: true }
         is_active: { type: boolean }
-        is_active_now: { type: boolean }
+        is_active_now: { type: boolean, description: 'Alias de `is_available_now` (compatibilidad)' }
+        is_available_now: { type: boolean, description: 'true si la promoción aplica ahora (tipo, día, fecha y hora)' }
         max_redemptions: { type: integer, nullable: true }
         redemptions_count: { type: integer }
         business: { nullable: true, allOf: [{ $ref: '#/components/schemas/ClientBusiness' }] }
@@ -2240,7 +2586,8 @@ components:
         code: { type: string, example: PP-8F3K2L9Q }
         status: { type: string, enum: [pending, completed, rejected, cancelled] }
         status_label: { type: string }
-        stamps_used: { type: integer }
+        stamps_used: { type: integer, description: 'Sellos consumidos (tarjetas `visits`)' }
+        points_used: { type: integer, description: 'Puntos consumidos (tarjetas `spend`)' }
         redeemed_at: { type: string, format: date-time, nullable: true }
         approved_at: { type: string, format: date-time, nullable: true }
         notes: { type: string, nullable: true }

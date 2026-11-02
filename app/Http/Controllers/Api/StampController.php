@@ -48,15 +48,23 @@ class StampController extends Controller
 
         return (new StampResource($stamp->load(['customerCard.user', 'registeredBy'])))
             ->additional([
-                'message' => 'Sello registrado.',
+                'message' => $card->isSpend()
+                    ? sprintf('Compra registrada: %d puntos.', (int) $stamp->points_awarded)
+                    : 'Sello registrado.',
                 'customer_card' => [
                     'id' => $card->getKey(),
                     'code' => $card->code,
+                    'progress_unit' => $card->progressUnit(),
                     'stamps_count' => (int) $card->stamps_count,
                     'required_stamps' => (int) $card->required_stamps,
+                    'points_count' => (int) $card->points_count,
+                    'total_points_earned' => (int) $card->total_points_earned,
                     'progress_percentage' => $card->progress_percentage,
+                    'progress' => $card->progress,
                     'status' => $card->status->value,
-                    'reward_available' => $card->isCompleted(),
+                    'reward_available' => $card->isSpend()
+                        ? $card->available_rewards->isNotEmpty()
+                        : $card->isCompleted(),
                 ],
             ])
             ->response()

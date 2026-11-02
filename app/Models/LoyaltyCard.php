@@ -2,6 +2,8 @@
 
 namespace App\Models;
 
+use App\Enums\CardPeriodType;
+use App\Enums\LoyaltyCardType;
 use App\Support\Media;
 use Database\Factories\LoyaltyCardFactory;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
@@ -13,15 +15,23 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Str;
 
 /**
- * Tarjeta de fidelidad (programa de sellos) definida por un negocio.
+ * Tarjeta de fidelidad definida por un negocio.
+ *
+ * Existen dos tipos:
+ *  - `visits`: el cliente acumula visitas y al llegar a `required_stamps`
+ *    obtiene la recompensa del ciclo (con vigencia opcional `period_days`).
+ *  - `spend`: cada `spend_amount_per_block` de consumo suma `points_per_block`
+ *    puntos; las recompensas se desbloquean por umbrales (`rewards.points_required`).
  *
  * El cliente se une al programa escaneando un QR que contiene `join_code`.
  */
 #[Fillable([
-    'business_id', 'name', 'slug', 'description', 'required_stamps', 'reward_description', 'terms',
+    'business_id', 'name', 'slug', 'description', 'type', 'required_stamps', 'reward_description', 'terms',
+    'period_type', 'period_days', 'currency', 'spend_amount_per_block', 'points_per_block',
     'logo_path', 'background_path', 'stamp_icon_path',
     'primary_color', 'secondary_color', 'text_color',
     'join_code', 'is_active', 'is_public', 'expires_at', 'settings',
@@ -48,7 +58,12 @@ class LoyaltyCard extends Model
     protected function casts(): array
     {
         return [
+            'type' => LoyaltyCardType::class,
+            'period_type' => CardPeriodType::class,
             'required_stamps' => 'integer',
+            'period_days' => 'integer',
+            'spend_amount_per_block' => 'decimal:2',
+            'points_per_block' => 'integer',
             'is_active' => 'boolean',
             'is_public' => 'boolean',
             'expires_at' => 'datetime',
@@ -104,6 +119,15 @@ class LoyaltyCard extends Model
         return $query->where('business_id', $business instanceof Business ? $business->getKey() : $business);
     }
 
+    public function scopeOfType(Builder $query, LoyaltyCardType|string|null $type): Builder
+    {
+        if (blank($type)) {
+            return $query;
+        }
+
+        return $query->where('type', $type instanceof LoyaltyCardType ? $type->value : $type);
+    }
+
     // -----------------------------------------------------------------
     // Accesores
     // -----------------------------------------------------------------
@@ -132,6 +156,60 @@ class LoyaltyCard extends Model
     }
 
     // -----------------------------------------------------------------
+    // Tipo de tarjeta
+    // -----------------------------------------------------------------
+
+    public function isVisits(): bool
+    {
+        return $this->type === LoyaltyCardType::Visits;
+    }
+
+    public function isSpend(): bool
+    {
+        return $this->type === LoyaltyCardType::Spend;
+    }
+
+    public function progressUnit(): string
+    {
+        return $this->type->progressUnit();
+    }
+
+    /**
+     * Puntos que genera un consumo de `$amount` en esta tarjeta.
+     */
+    public function pointsForAmount(float $amount): int
+    {
+        $perBlock = (float) ($this->spend_amount_per_block ?? 0);
+        $points = (int) ($this->points_per_block ?? 0);
+
+        if ($perBlock <= 0 || $points <= 0 || $amount <= 0) {
+            return 0;
+        }
+
+        return (int) floor($amount / $perBlock) * $points;
+    }
+
+    /**
+     * ¿El ciclo caduca? Sólo cuando el negocio define un lapso de días.
+     */
+    public function hasPeriod(): bool
+    {
+        return $this->period_type === CardPeriodType::Days && (int) $this->period_days > 0;
+    }
+
+    /**
+     * Fecha de caducidad del ciclo que empieza en `$start`.
+     */
+    public function cycleExpiresAtFrom(?Carbon $start = null): ?Carbon
+    {
+        if (! $this->hasPeriod()) {
+            return null;
+        }
+
+        return ($start ?? now())->copy()->addDays((int) $this->period_days);
+    }
+
+    // -----------------------------------------------------------------
     // Helpers
     // -----------------------------------------------------------------
 
@@ -143,14 +221,55 @@ class LoyaltyCard extends Model
     }
 
     /**
-     * Recompensa que se alcanza con el número de sellos indicado.
+     * Recompensas activas ordenadas por umbral (visitas o puntos).
+     *
+     * @return \Illuminate\Support\Collection<int, Reward>
      */
-    public function rewardFor(int $stamps): ?Reward
+    public function rewardTiers()
     {
         return $this->rewards()
             ->where('is_active', true)
-            ->where('required_stamps', '<=', $stamps)
+            ->orderedByThreshold()
+            ->get();
+    }
+
+    /**
+     * Recompensa alcanzada con el número de visitas/puntos indicado.
+     */
+    public function rewardFor(int $value): ?Reward
+    {
+        $query = $this->rewards()->where('is_active', true);
+
+        if ($this->isSpend()) {
+            return $query->whereNotNull('points_required')
+                ->where('points_required', '<=', $value)
+                ->orderByDesc('points_required')
+                ->first();
+        }
+
+        return $query->whereNotNull('required_stamps')
+            ->where('required_stamps', '<=', $value)
             ->orderByDesc('required_stamps')
+            ->first();
+    }
+
+    /**
+     * Umbral de la siguiente recompensa por encima de `$value`.
+     */
+    public function nextRewardFor(int $value): ?Reward
+    {
+        $query = $this->rewards()->where('is_active', true);
+
+        if ($this->isSpend()) {
+            return $query->whereNotNull('points_required')
+                ->where('points_required', '>', $value)
+                ->orderBy('points_required')
+                ->first();
+        }
+
+        return $query->whereNotNull('required_stamps')
+            ->where('required_stamps', '>', $value)
+            ->orderBy('required_stamps')
             ->first();
     }
 }

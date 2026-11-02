@@ -3,6 +3,7 @@
 namespace App\Http\Controllers\Api\Client;
 
 use App\Enums\DiscountType;
+use App\Enums\PromotionScheduleType;
 use App\Http\Controllers\Controller;
 use App\Http\Resources\Client\PromotionResource;
 use App\Models\CustomerCard;
@@ -37,6 +38,9 @@ class PromotionController extends Controller
                 'string',
                 Rule::in(array_map(fn (DiscountType $type): string => $type->value, DiscountType::cases())),
             ],
+            'schedule_type' => ['nullable', Rule::enum(PromotionScheduleType::class)],
+            // `true` devuelve sólo las que aplican en este momento (día, fecha y hora).
+            'available_now' => ['nullable', 'boolean'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:'.config('punto_plus.per_page.max')],
             'page' => ['nullable', 'integer', 'min:1'],
         ]);
@@ -61,11 +65,20 @@ class PromotionController extends Controller
                 });
             })
             ->when(filled($filters['discount_type'] ?? null), fn (Builder $query): Builder => $query->where('discount_type', $filters['discount_type']))
+            ->ofScheduleType($filters['schedule_type'] ?? null)
             ->with(['business', 'loyaltyCard'])
             ->orderByDesc('starts_at')
             ->orderByDesc('created_at')
             ->paginate($this->perPage($request))
             ->withQueryString();
+
+        if ($request->boolean('available_now')) {
+            $promotions->setCollection(
+                $promotions->getCollection()
+                    ->filter(fn (Promotion $promotion): bool => $promotion->isAvailableNow())
+                    ->values(),
+            );
+        }
 
         return PromotionResource::collection($promotions);
     }

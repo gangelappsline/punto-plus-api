@@ -59,7 +59,12 @@ class ExpireLoyaltyCards extends Command
     }
 
     /**
-     * Reinicia los sellos de las tarjetas que llevan demasiado tiempo sin actividad.
+     * Reinicia el progreso de las tarjetas que caducaron.
+     *
+     * Dos motivos distintos:
+     *  - el ciclo de la tarjeta venció (`loyalty_cards.period_days`), en cuyo caso se
+     *    abre un ciclo nuevo con el contador a cero (visitas y puntos);
+     *  - la tarjeta lleva más días sin actividad que `stampLifetimeDays()`.
      */
     private function resetExpiredStamps(Carbon $now, bool $dryRun): int
     {
@@ -67,23 +72,38 @@ class ExpireLoyaltyCards extends Command
 
         CustomerCard::query()
             ->where('status', CardStatus::Active->value)
-            ->where('stamps_count', '>', 0)
-            ->whereNotNull('last_stamp_at')
+            ->where(function (Builder $query) use ($now): void {
+                $query->where('stamps_count', '>', 0)
+                    ->orWhere('points_count', '>', 0)
+                    ->orWhere(fn (Builder $q) => $q->whereNotNull('cycle_expires_at')->where('cycle_expires_at', '<=', $now));
+            })
             ->chunkById(200, function (\Illuminate\Support\Collection $cards) use ($now, $dryRun, &$reset): void {
                 /** @var CustomerCard $card */
                 foreach ($cards as $card) {
+                    // Ciclo vencido: se reinicia y arranca uno nuevo.
+                    if ($card->cycle_expires_at !== null && $card->cycle_expires_at->lte($now)) {
+                        if (! $dryRun) {
+                            $card->resetCycle($now)->save();
+                        }
+
+                        $reset++;
+
+                        continue;
+                    }
+
                     $days = $card->stampLifetimeDays();
 
                     if ($days === null || $days <= 0) {
                         continue;
                     }
 
-                    if ($card->last_stamp_at->gt($now->copy()->subDays($days))) {
+                    if ($card->last_stamp_at !== null && $card->last_stamp_at->gt($now->copy()->subDays($days))) {
                         continue;
                     }
 
                     if (! $dryRun) {
                         $card->stamps_count = 0;
+                        $card->points_count = 0;
                         $card->completed_at = null;
                         $card->save();
                     }

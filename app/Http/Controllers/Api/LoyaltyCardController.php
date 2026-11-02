@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\CardPeriodType;
+use App\Enums\LoyaltyCardType;
 use App\Enums\RewardType;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\Business\UploadAssetRequest;
@@ -18,6 +20,8 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Gestión de las tarjetas de fidelidad del negocio autenticado.
@@ -48,10 +52,17 @@ class LoyaltyCardController extends Controller
         $filters = $request->validate([
             'search' => ['nullable', 'string', 'max:120'],
             'is_active' => ['nullable', 'boolean'],
+            'type' => ['nullable', Rule::enum(LoyaltyCardType::class)],
+            'period_type' => ['nullable', Rule::enum(CardPeriodType::class)],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:'.config('punto_plus.per_page.max')],
         ]);
 
         $cards = $business->loyaltyCards()
+            ->ofType($filters['type'] ?? null)
+            ->when(
+                filled($filters['period_type'] ?? null),
+                fn ($query) => $query->where('period_type', $filters['period_type']),
+            )
             ->when(
                 filled($filters['search'] ?? null),
                 fn ($query) => $query->where('name', 'like', '%'.$filters['search'].'%'),
@@ -81,16 +92,38 @@ class LoyaltyCardController extends Controller
         $rewards = $data['rewards'] ?? [];
         unset($data['rewards']);
 
+        $type = LoyaltyCardType::tryFrom($data['type'] ?? '') ?? LoyaltyCardType::Visits;
+        $periodType = CardPeriodType::tryFrom($data['period_type'] ?? '') ?? CardPeriodType::Unlimited;
+
+        $this->assertThresholdsAreDistinct($rewards, $type);
+
         $inherit = $request->boolean('inherit_business_branding', true);
         $defaults = $business->defaultCardSettings();
 
-        $card = DB::transaction(function () use ($business, $data, $rewards, $inherit, $defaults): LoyaltyCard {
+        $card = DB::transaction(function () use ($business, $data, $rewards, $inherit, $defaults, $type, $periodType): LoyaltyCard {
             $settings = array_merge($defaults, $data['settings'] ?? []);
+
+            $requiredStamps = $type->isVisits()
+                ? ($data['required_stamps'] ?? $settings['required_stamps'] ?? config('punto_plus.cards.default_required_stamps'))
+                : null;
 
             $attributes = [
                 'name' => $data['name'],
                 'description' => $data['description'] ?? null,
-                'required_stamps' => $data['required_stamps'] ?? $settings['required_stamps'] ?? config('punto_plus.cards.default_required_stamps'),
+
+                // Tipo de programa y su configuración.
+                'type' => $type->value,
+                'required_stamps' => $requiredStamps,
+                'currency' => $type->isSpend()
+                    ? strtoupper($data['currency'] ?? config('punto_plus.cards.default_currency'))
+                    : null,
+                'spend_amount_per_block' => $type->isSpend() ? ($data['spend_amount_per_block'] ?? null) : null,
+                'points_per_block' => $type->isSpend() ? ($data['points_per_block'] ?? null) : null,
+
+                // Vigencia del ciclo.
+                'period_type' => $periodType->value,
+                'period_days' => $periodType->requiresDays() ? (int) $data['period_days'] : null,
+
                 'reward_description' => $data['reward_description'] ?? null,
                 'terms' => $data['terms'] ?? null,
                 'primary_color' => $data['primary_color'] ?? $settings['primary_color'] ?? null,
@@ -115,7 +148,10 @@ class LoyaltyCardController extends Controller
                     'description' => $reward['description'] ?? null,
                     'reward_type' => $reward['reward_type'] ?? RewardType::FreeProduct,
                     'value' => $reward['value'] ?? null,
-                    'required_stamps' => $reward['required_stamps'] ?? $card->required_stamps,
+                    'required_stamps' => $type->isVisits()
+                        ? ($reward['required_stamps'] ?? $requiredStamps)
+                        : null,
+                    'points_required' => $type->isSpend() ? ($reward['points_required'] ?? null) : null,
                     'stock' => $reward['stock'] ?? null,
                     'is_active' => $reward['is_active'] ?? true,
                 ]);
@@ -148,7 +184,7 @@ class LoyaltyCardController extends Controller
     {
         $this->authorize('update', $loyaltyCard);
 
-        $loyaltyCard->fill($request->validated())->save();
+        $loyaltyCard->fill($this->normalizeCardAttributes($loyaltyCard, $request->validated()))->save();
 
         return new LoyaltyCardResource(
             $loyaltyCard->load('rewards')->loadCount(['rewards', 'customerCards', 'stamps'])
@@ -226,7 +262,8 @@ class LoyaltyCardController extends Controller
 
             foreach ($loyaltyCard->rewards as $reward) {
                 $copy->rewards()->create($reward->only([
-                    'name', 'description', 'reward_type', 'value', 'required_stamps', 'stock', 'is_active',
+                    'name', 'description', 'reward_type', 'value',
+                    'required_stamps', 'points_required', 'stock', 'is_active',
                 ]) + ['business_id' => $loyaltyCard->business_id]);
             }
 
@@ -259,21 +296,98 @@ class LoyaltyCardController extends Controller
         $earned = (int) (clone $cards)->sum('rewards_earned');
         $redeemed = (int) (clone $cards)->sum('rewards_redeemed');
 
+        $validRedemptions = Redemption::where('business_id', $loyaltyCard->business_id)
+            ->where('status', 'completed')
+            ->whereHas('reward', fn ($query) => $query->where('loyalty_card_id', $loyaltyCard->getKey()));
+
         return response()->json([
             'loyalty_card_id' => $loyaltyCard->getKey(),
+            'type' => $loyaltyCard->type->value,
+            'progress_unit' => $loyaltyCard->progressUnit(),
             'customers' => (clone $cards)->count(),
-            'customers_completed' => (clone $cards)->where('status', 'completed')->count(),
-            'stamps_total' => (clone $stamps)->count(),
-            'stamps_last_30_days' => (clone $stamps)->where('stamped_at', '>=', now()->subDays(30))->count(),
+            'customers_completed' => $loyaltyCard->isSpend()
+                ? 0
+                : (clone $cards)->where('status', 'completed')->count(),
+            'stamps_total' => $loyaltyCard->isSpend() ? 0 : (clone $stamps)->count(),
+            'stamps_last_30_days' => $loyaltyCard->isSpend()
+                ? 0
+                : (clone $stamps)->where('stamped_at', '>=', now()->subDays(30))->count(),
+            'points_awarded' => $loyaltyCard->isSpend() ? (int) (clone $cards)->sum('total_points_earned') : 0,
+            'points_balance' => $loyaltyCard->isSpend() ? (int) (clone $cards)->sum('points_count') : 0,
             'rewards_earned' => $earned,
             'rewards_redeemed' => $redeemed,
             'rewards_available' => max(0, $earned - $redeemed),
-            'redemptions_completed' => Redemption::where('business_id', $loyaltyCard->business_id)
-                ->where('status', 'completed')
-                ->whereHas('reward', fn ($query) => $query->where('loyalty_card_id', $loyaltyCard->getKey()))
-                ->count(),
+            'redemptions_completed' => (clone $validRedemptions)->count(),
+            'points_redeemed' => $loyaltyCard->isSpend() ? (int) (clone $validRedemptions)->sum('points_used') : 0,
             'rewards_defined' => $loyaltyCard->rewards()->count(),
             'generated_at' => now()->toIso8601String(),
         ]);
+    }
+
+    /**
+     * Normaliza los campos que dependen del tipo de tarjeta al actualizar.
+     *
+     * Evita que queden datos contradictorios: una tarjeta por consumo no guarda
+     * `required_stamps` y una por visitas no guarda la configuración de puntos.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function normalizeCardAttributes(LoyaltyCard $card, array $data): array
+    {
+        if (array_key_exists('type', $data)) {
+            $type = LoyaltyCardType::tryFrom((string) $data['type']) ?? $card->type;
+
+            if ($type->isVisits()) {
+                $data['currency'] = null;
+                $data['spend_amount_per_block'] = null;
+                $data['points_per_block'] = null;
+                $data['required_stamps'] ??= config('punto_plus.cards.default_required_stamps');
+            } else {
+                $data['required_stamps'] = null;
+            }
+        }
+
+        if (array_key_exists('currency', $data) && filled($data['currency'])) {
+            $data['currency'] = strtoupper((string) $data['currency']);
+        }
+
+        if (array_key_exists('period_type', $data)) {
+            $periodType = CardPeriodType::tryFrom((string) $data['period_type']) ?? CardPeriodType::Unlimited;
+
+            if ($periodType->requiresDays()) {
+                $data['period_days'] ??= $card->period_days ?? 30;
+            } else {
+                $data['period_days'] = null;
+            }
+        } elseif (array_key_exists('period_days', $data) && $data['period_days'] !== null) {
+            // Enviar sólo `period_days` implica que el ciclo dura ese lapso.
+            $data['period_type'] = CardPeriodType::Days->value;
+        }
+
+        return $data;
+    }
+
+    /**
+     * Las recompensas de una tarjeta no pueden compartir umbral.
+     *
+     * @param  array<int, array<string, mixed>>  $rewards
+     */
+    private function assertThresholdsAreDistinct(array $rewards, LoyaltyCardType $type): void
+    {
+        $field = $type->isSpend() ? 'points_required' : 'required_stamps';
+
+        $thresholds = collect($rewards)
+            ->pluck($field)
+            ->filter(fn ($value): bool => $value !== null && $value !== '')
+            ->map(fn ($value): int => (int) $value);
+
+        if ($thresholds->duplicates()->isNotEmpty()) {
+            throw ValidationException::withMessages([
+                "rewards.*.{$field}" => $type->isSpend()
+                    ? 'Dos recompensas no pueden pedir los mismos puntos.'
+                    : 'Dos recompensas no pueden pedir las mismas visitas.',
+            ]);
+        }
     }
 }

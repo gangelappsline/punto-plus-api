@@ -145,23 +145,33 @@ class CustomerCardController extends Controller
     {
         $this->authorize('view', $customerCard);
 
+        $unit = $customerCard->progressUnit();
+
         $rewards = $customerCard->loyaltyCard->rewards()
             ->where('is_active', true)
-            ->orderBy('required_stamps')
+            ->orderedByThreshold()
             ->get();
 
         return response()->json([
-            'data' => $rewards->map(function (Reward $reward) use ($customerCard): array {
+            'data' => $rewards->map(function (Reward $reward) use ($customerCard, $unit): array {
                 /** @var array<string, mixed> $data */
                 $data = (new RewardResource($reward))->resolve();
 
+                $missing = $customerCard->missingUnitsFor($reward);
+
                 return $data + [
+                    // Umbral en la unidad de la tarjeta: visitas o puntos.
+                    'threshold' => $reward->thresholdFor($customerCard->loyaltyCard?->type),
+                    'threshold_unit' => $unit,
                     'can_redeem' => $customerCard->meetsRequirementFor($reward)
                         && $customerCard->isUsable()
                         && $reward->hasStock(),
-                    'missing_stamps' => max(0, (int) $reward->required_stamps - (int) $customerCard->stamps_count),
+                    'missing_units' => $missing,
+                    'missing_stamps' => $unit === 'visits' ? $missing : 0,
+                    'missing_points' => $unit === 'points' ? $missing : 0,
                 ];
             })->values(),
+            'progress_unit' => $unit,
             'progress' => $customerCard->progress,
         ]);
     }

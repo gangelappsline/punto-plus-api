@@ -35,7 +35,7 @@ final class RedemptionService
         $this->assertCardOwnership($card, $customer);
         $this->assertRewardBelongsToCard($card, $reward);
         $this->assertRewardIsRedeemable($reward);
-        $this->assertCardHasEnoughStamps($card, $reward);
+        $this->assertCardHasEnoughUnits($card, $reward);
         $this->assertNoPendingRedemption($card);
 
         $redemption = DB::transaction(function () use ($card, $reward, $customer, $notes): Redemption {
@@ -51,15 +51,32 @@ final class RedemptionService
             $lockedReward->redemptions_count = $lockedReward->redemptions_count + 1;
             $lockedReward->save();
 
-            $stampsUsed = $this->stampsToUse($lockedCard, $lockedReward);
+            $stampsUsed = 0;
+            $pointsUsed = 0;
 
-            $lockedCard->stamps_count = max(0, $lockedCard->stamps_count - $stampsUsed);
-            $lockedCard->status = $lockedCard->stamps_count >= $lockedCard->required_stamps
-                ? CardStatus::Completed
-                : CardStatus::Active;
-            $lockedCard->completed_at = $lockedCard->status === CardStatus::Completed
-                ? ($lockedCard->completed_at ?? now())
-                : null;
+            if ($lockedCard->isSpend()) {
+                // Tarjetas por consumo: se descuentan los puntos del nivel canjeado
+                // y el saldo restante se conserva.
+                $pointsUsed = max(0, (int) $lockedReward->points_required);
+                $lockedCard->points_count = max(0, $lockedCard->points_count - $pointsUsed);
+            } else {
+                $stampsUsed = $this->stampsToUse($lockedCard, $lockedReward);
+
+                $lockedCard->stamps_count = max(0, $lockedCard->stamps_count - $stampsUsed);
+                $lockedCard->status = $lockedCard->stamps_count >= $lockedCard->required_stamps
+                    ? CardStatus::Completed
+                    : CardStatus::Active;
+                $lockedCard->completed_at = $lockedCard->status === CardStatus::Completed
+                    ? ($lockedCard->completed_at ?? now())
+                    : null;
+
+                // El canje cierra el ciclo: si la tarjeta define un lapso de días,
+                // comienza uno nuevo.
+                if ($stampsUsed > 0 && $lockedCard->loyaltyCard?->hasPeriod()) {
+                    $lockedCard->startCycle(now());
+                }
+            }
+
             $lockedCard->save();
 
             return Redemption::create([
@@ -69,6 +86,7 @@ final class RedemptionService
                 'user_id' => $customer->getKey(),
                 'status' => RedemptionStatus::Pending,
                 'stamps_used' => $stampsUsed,
+                'points_used' => $pointsUsed,
                 'redeemed_at' => now(),
                 'notes' => $notes,
             ]);
@@ -166,16 +184,23 @@ final class RedemptionService
 
             $redemption->save();
 
-            // Devolvemos los sellos consumidos y el stock reservado.
+            // Devolvemos los sellos o puntos consumidos y el stock reservado.
             $card = $redemption->customerCard()->lockForUpdate()->firstOrFail();
 
-            $required = $card->required_stamps;
+            $pointsUsed = (int) $redemption->points_used;
 
-            $card->stamps_count = min($required, $card->stamps_count + (int) $redemption->stamps_used);
+            if ($pointsUsed > 0) {
+                // Tarjetas por consumo: se devuelven los puntos exactos.
+                $card->points_count = $card->points_count + $pointsUsed;
+            } else {
+                $required = max(1, (int) $card->required_stamps);
 
-            if ($card->stamps_count >= $required) {
-                $card->status = CardStatus::Completed;
-                $card->completed_at ??= now();
+                $card->stamps_count = min($required, $card->stamps_count + (int) $redemption->stamps_used);
+
+                if ($card->stamps_count >= $required) {
+                    $card->status = CardStatus::Completed;
+                    $card->completed_at ??= now();
+                }
             }
 
             $card->save();
@@ -249,17 +274,25 @@ final class RedemptionService
         }
     }
 
-    private function assertCardHasEnoughStamps(CustomerCard $card, Reward $reward): void
+    /**
+     * Comprueba el umbral en la unidad correcta: visitas o puntos.
+     */
+    private function assertCardHasEnoughUnits(CustomerCard $card, Reward $reward): void
     {
-        if (! $card->meetsRequirementFor($reward)) {
-            throw ValidationException::withMessages([
-                'reward_id' => sprintf(
-                    'Necesitas %d sellos y tienes %d.',
-                    (int) $reward->required_stamps,
-                    (int) $card->stamps_count,
-                ),
-            ]);
+        if ($card->meetsRequirementFor($reward)) {
+            return;
         }
+
+        $unit = $card->progressUnit() === 'points' ? 'puntos' : 'visitas';
+
+        throw ValidationException::withMessages([
+            'reward_id' => sprintf(
+                'Te faltan %d %s para esta recompensa (tienes %d).',
+                $card->missingUnitsFor($reward),
+                $unit,
+                $card->currentUnits(),
+            ),
+        ]);
     }
 
     private function assertNoPendingRedemption(CustomerCard $card): void

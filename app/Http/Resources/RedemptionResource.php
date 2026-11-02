@@ -21,6 +21,7 @@ class RedemptionResource extends JsonResource
             'status' => $this->status->value,
             'status_label' => $this->status->label(),
             'stamps_used' => (int) $this->stamps_used,
+            'points_used' => (int) $this->points_used,
             'redeemed_at' => $this->redeemed_at?->toIso8601String(),
             'approved_at' => $this->approved_at?->toIso8601String(),
             'notes' => $this->notes,
