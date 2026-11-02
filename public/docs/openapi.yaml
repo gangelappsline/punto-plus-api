@@ -52,6 +52,21 @@ info:
     `data:image/png;base64,`). El API lo convierte, lo guarda en el disco `public`
     (carpeta `promotions/{id}/banner`) y devuelve la ruta en `image_path` y la URL
     pública en `image_url`.
+
+    ## Tokens de venta (`GET /api/business/new-token` → `POST /api/customer/validate-token`)
+
+    Flujo inverso al escaneo de tarjetas: el **negocio genera un token** de venta y lo muestra
+    como QR (o como código de texto); el **cliente lo valida** desde su app y la compra se suma a
+    su tarjeta.
+
+    1. `GET /api/business/new-token` → `code` de 8 caracteres + `qr` (payload/json/svg).
+    2. El cliente escanea el QR o escribe `display_code` (`ABCD-EFGH`).
+    3. `POST /api/customer/validate-token` con `code` → registra el sello/puntos
+       (`source: token`) y **elimina** el token.
+
+    El token dura `SALE_TOKEN_TTL_MINUTES` (**5 minutos** por defecto), es de un solo uso y se
+    invalida al validarse; si la venta no se puede registrar (throttle, tope diario, tarjeta
+    llena) el token sigue vigente para reintentar. Guía completa: `docs/tokens-venta.md`.
   contact:
     name: Punto Plus
     email: hola@puntoplus.test
@@ -493,6 +508,64 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/CustomerCardResponse' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+
+  /api/customer/validate-token:
+    post:
+      tags: [Cliente]
+      summary: Validar el token de venta del negocio
+      description: |
+        El cliente escanea el QR que muestra el negocio (`code`, JSON del QR, deep link o URL con
+        `?code=`) o escribe el código (`K7QM-2XPD`, `k7qm2xpd`).
+
+        - Registra la compra en la tarjeta del cliente con `source: token`.
+        - El token se elimina (un solo uso) dentro de la misma transacción que el sello: si la
+          venta falla, el token sigue vigente.
+        - Si el cliente no tenía tarjeta en ese programa, se une automáticamente (programas públicos).
+        - `purchase_amount` es obligatorio en tarjetas por consumo si el token no trae el monto.
+        - El dueño del negocio no puede validar sus propios tokens.
+      security: [{ OAuth2: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, description: 'Código del token (texto, JSON del QR o URL con ?code=)', example: K7QM-2XPD }
+                purchase_amount: { type: number, nullable: true, description: 'Monto de la compra; obligatorio en tarjetas por consumo si el token no lo trae', example: 250 }
+      responses:
+        '201':
+          description: Venta registrada en la tarjeta del cliente
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SaleTokenValidationResponse' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/client/validate-token:
+    post:
+      tags: [Cliente]
+      summary: 'Alias de `/api/customer/validate-token`'
+      description: Mismo controlador y semántica que `POST /api/customer/validate-token`.
+      security: [{ OAuth2: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, example: K7QM-2XPD }
+                purchase_amount: { type: number, nullable: true }
+      responses:
+        '201':
+          description: Venta registrada
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SaleTokenValidationResponse' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
   /api/customer/cards/{customerCard}:
@@ -1587,6 +1660,68 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Message' }
 
+  /api/business/new-token:
+    get:
+      tags: [Negocio]
+      summary: Generar un token de venta (QR para el cliente)
+      description: |
+        Devuelve `201` con el token recién creado. El panel dibuja `qr.svg` (o codifica
+        `qr_content` por su cuenta) y el cliente lo valida con
+        `POST /api/customer/validate-token`.
+
+        - Dura `SALE_TOKEN_TTL_MINUTES` minutos (**5** por defecto) y es de un solo uso.
+        - `loyalty_card_id` es obligatorio cuando el negocio tiene más de una tarjeta activa.
+        - `purchase_amount` es obligatorio para tarjetas por consumo (los puntos dependen del monto).
+        - `SALE_TOKEN_MAX_ACTIVE` limita los tokens vivos por negocio (10 por defecto); al generar
+          uno nuevo se descartan los más antiguos.
+      security: [{ OAuth2: [] }]
+      parameters:
+        - { name: loyalty_card_id, in: query, schema: { type: string, format: uuid }, description: 'Tarjeta a la que aplica el token' }
+        - { name: purchase_amount, in: query, schema: { type: number, example: 250 }, description: 'Monto de la venta (obligatorio en tarjetas por consumo)' }
+        - { name: notes, in: query, schema: { type: string, maxLength: 255 }, description: 'Nota interna que se copia al sello' }
+      responses:
+        '201':
+          description: Token generado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SaleTokenResponse' }
+        '422': { $ref: '#/components/responses/ValidationError' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+
+  /api/business/tokens:
+    get:
+      tags: [Negocio]
+      summary: Tokens de venta vivos del negocio
+      description: Los que todavía se pueden validar (para repintar el QR al recargar el panel).
+      security: [{ OAuth2: [] }]
+      responses:
+        '200':
+          description: Tokens vivos
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/SaleToken' }
+
+  /api/business/tokens/{saleToken}:
+    parameters:
+      - $ref: '#/components/parameters/SaleTokenId'
+    delete:
+      tags: [Negocio]
+      summary: Cancelar un token de venta
+      description: Lo elimina antes de que caduque (por ejemplo si el cliente se fue sin validarlo).
+      security: [{ OAuth2: [] }]
+      responses:
+        '200':
+          description: Token cancelado
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Message' }
+        '403': { $ref: '#/components/responses/Forbidden' }
+
   /api/business/stamps/scan:
     post:
       tags: [Negocio]
@@ -1617,7 +1752,7 @@ paths:
                 purchase_amount: { type: number, format: float, nullable: true, description: 'Monto de la compra. Obligatorio en tarjetas por consumo y debe cubrir al menos un bloque de gasto.', example: 250 }
                 notes: { type: string, nullable: true }
                 stamped_at: { type: string, format: date-time, nullable: true }
-                source: { type: string, enum: [scan, manual, import, adjustment] }
+                source: { type: string, enum: [scan, manual, import, adjustment, token], description: '`token` = venta validada por el cliente con un token de venta' }
                 idempotency_key: { type: string, nullable: true }
       responses:
         '201':
@@ -1629,21 +1764,7 @@ paths:
                 properties:
                   message: { type: string, example: Sello registrado. }
                   data: { $ref: '#/components/schemas/Stamp' }
-                  customer_card:
-                    type: object
-                    description: Resumen del progreso después de la compra.
-                    properties:
-                      id: { type: string, format: uuid }
-                      code: { type: string }
-                      progress_unit: { type: string, enum: [visits, points] }
-                      stamps_count: { type: integer }
-                      required_stamps: { type: integer }
-                      points_count: { type: integer }
-                      total_points_earned: { type: integer }
-                      progress_percentage: { type: number }
-                      progress: { $ref: '#/components/schemas/Progress' }
-                      status: { type: string, enum: [active, completed, expired, blocked] }
-                      reward_available: { type: boolean, description: 'En tarjetas por consumo: hay alguna recompensa alcanzada con sus puntos' }
+                  customer_card: { $ref: '#/components/schemas/CustomerCardSummary' }
         '403': { $ref: '#/components/responses/Forbidden' }
         '422': { $ref: '#/components/responses/ValidationError' }
 
@@ -2110,6 +2231,11 @@ components:
       in: path
       required: true
       schema: { type: string, format: uuid }
+    SaleTokenId:
+      name: saleToken
+      in: path
+      required: true
+      schema: { type: string, format: uuid }
 
   responses:
     AuthSuccess:
@@ -2476,6 +2602,64 @@ components:
         customer_card: { nullable: true, allOf: [{ $ref: '#/components/schemas/CustomerCard' }] }
         created_at: { type: string, format: date-time }
 
+    CustomerCardSummary:
+      type: object
+      description: Resumen del progreso de la tarjeta después de la compra.
+      properties:
+        id: { type: string, format: uuid }
+        code: { type: string }
+        progress_unit: { type: string, enum: [visits, points] }
+        stamps_count: { type: integer }
+        required_stamps: { type: integer }
+        points_count: { type: integer }
+        total_points_earned: { type: integer }
+        progress_percentage: { type: number }
+        progress: { $ref: '#/components/schemas/Progress' }
+        status: { type: string, enum: [active, completed, expired, blocked] }
+        reward_available: { type: boolean, description: 'En tarjetas por consumo: hay alguna recompensa alcanzada con sus puntos' }
+
+    SaleToken:
+      type: object
+      description: |
+        Token de venta. El negocio lo genera y el cliente lo valida; la compra queda en su
+        tarjeta con `source: token`.
+      properties:
+        id: { type: string, format: uuid }
+        business_id: { type: string, format: uuid }
+        loyalty_card_id: { type: string, format: uuid }
+        code: { type: string, example: K7QM2XPD, description: 'Código que viaja en el QR' }
+        display_code: { type: string, example: K7QM-2XPD, description: 'Código agrupado para dictarlo o teclearlo' }
+        purchase_amount: { type: number, nullable: true, example: 250 }
+        notes: { type: string, nullable: true }
+        expires_at: { type: string, format: date-time }
+        expires_in_seconds: { type: integer, example: 300 }
+        ttl_minutes: { type: integer, example: 5 }
+        is_expired: { type: boolean }
+        qr: { $ref: '#/components/schemas/QrCode' }
+        qr_content: { type: string, description: 'Cadena exacta que debe ir dentro del QR' }
+        loyalty_card: { nullable: true, allOf: [{ $ref: '#/components/schemas/LoyaltyCard' }] }
+        created_at: { type: string, format: date-time }
+
+    SaleTokenResponse:
+      type: object
+      properties:
+        message: { type: string, example: 'Token generado: compártelo con tu cliente antes de 5 minutos.' }
+        data: { $ref: '#/components/schemas/SaleToken' }
+
+    SaleTokenValidationResponse:
+      type: object
+      description: |
+        Misma forma que `POST /api/business/stamps/scan` (sello + progreso), más el token usado.
+      properties:
+        message: { type: string, example: 'Venta registrada: sello añadido a tu tarjeta.' }
+        data: { $ref: '#/components/schemas/Stamp' }
+        customer_card: { $ref: '#/components/schemas/CustomerCardSummary' }
+        sale_token:
+          type: object
+          properties:
+            code: { type: string, example: K7QM2XPD }
+            used: { type: boolean, example: true }
+
     Promotion:
       type: object
       properties:
@@ -2656,13 +2840,15 @@ components:
           `business_id`, `business` (nombre) y `url`.
         - `customer_card.identify` (lo escanea el negocio para sellar): `code`, `loyalty_card_id`,
           `business_id`, `holder` (nombre del cliente), `stamps` y `required_stamps`.
+        - `sale_token.redeem` (lo muestra el negocio y lo escanea el cliente): `code`,
+          `loyalty_card_id`, `business_id`, `business` y `expires_at`.
       properties:
         payload:
           type: object
           description: Contenido estructurado del QR (para regenerarlo en la app)
           properties:
             v: { type: integer, example: 1, description: Versión del formato del payload }
-            type: { type: string, enum: [loyalty_card.join, customer_card.identify] }
+            type: { type: string, enum: [loyalty_card.join, customer_card.identify, sale_token.redeem] }
             join_code: { type: string, nullable: true, description: 'Código de alta del programa (payload loyalty_card.join)' }
             code: { type: string, nullable: true, description: 'Código de la tarjeta del cliente (payload customer_card.identify)' }
             loyalty_card_id: { type: string, format: uuid, nullable: true }
@@ -2672,6 +2858,7 @@ components:
             stamps: { type: integer, nullable: true, example: 3, description: Sellos acumulados en el momento de generar el QR }
             required_stamps: { type: integer, nullable: true, example: 10 }
             url: { type: string, format: uri, nullable: true, example: 'https://puntoplus.test/join?code=CAFE2026' }
+            expires_at: { type: string, format: date-time, nullable: true, description: 'Caducidad del token de venta (payload sale_token.redeem)' }
         json: { type: string, description: Cadena JSON exacta que codifica el QR }
         svg: { type: string, nullable: true, description: 'SVG del QR (null si bacon/bacon-qr-code no está instalado)' }
 

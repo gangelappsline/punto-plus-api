@@ -165,6 +165,33 @@ return [
     |--------------------------------------------------------------------------
     */
 
+    /*
+    |--------------------------------------------------------------------------
+    | Tokens de venta (QR del negocio → validación del cliente)
+    |--------------------------------------------------------------------------
+    |
+    | El negocio genera un código de un solo uso y el cliente lo valida para
+    | que la compra cuente en su tarjeta.
+    |
+    */
+
+    'sale_tokens' => [
+        // Vigencia del token en minutos (5 por defecto).
+        'ttl_minutes' => (int) env('SALE_TOKEN_TTL_MINUTES', 5),
+
+        // Longitud del código (alfabeto sin caracteres ambiguos: sin 0/O/1/I/L).
+        'code_length' => (int) env('SALE_TOKEN_CODE_LENGTH', 8),
+
+        // Tokens vivos simultáneos por negocio; al superarlo se descartan los más antiguos (0 = sin límite).
+        'max_active' => (int) env('SALE_TOKEN_MAX_ACTIVE', 10),
+
+        /*
+         | Anti-fraude: por defecto el dueño del negocio no puede validar sus
+         | propios tokens (evita auto-sellarse). Actívalo sólo para pruebas.
+         */
+        'allow_self_redemption' => (bool) env('SALE_TOKEN_ALLOW_SELF_REDEMPTION', false),
+    ],
+
     'business_qr' => [
         'defaults' => [
             'destination_type' => 'menu',

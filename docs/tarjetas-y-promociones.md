@@ -266,3 +266,19 @@ Desde el panel del negocio el equivalente es `GET /api/business/promotions`.
 
 Anular la compra (`DELETE /api/business/stamps/{stamp}`) devuelve los sellos **o** los
 puntos concedidos.
+
+---
+
+## 5. Registrar la venta
+
+Hay dos caminos y ambos suman lo mismo a la tarjeta del cliente (`stamps` con su
+`purchase_amount`/`points_awarded`):
+
+| Camino | Quién escanea | Endpoint |
+|---|---|---|
+| El negocio escanea la tarjeta del cliente | Negocio | `POST /api/business/stamps/scan` |
+| El negocio genera un token y el cliente lo valida | Cliente | `GET /api/business/new-token` → `POST /api/customer/validate-token` |
+
+El segundo está pensado para mostrador sin lector de la tarjeta del cliente: el token dura 5
+minutos, es de un solo uso y queda en el sello como `source: token`. Guía completa en
+[`docs/tokens-venta.md`](tokens-venta.md).

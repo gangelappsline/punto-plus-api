@@ -15,7 +15,8 @@ use Illuminate\Support\Facades\Schedule;
 Schedule::command('passport:purge')->daily()->at('03:00');
 
 // Cierra tarjetas caducadas y libera códigos de canje pendientes olvidados.
-Schedule::command('model:prune', ['--model' => [\App\Models\Redemption::class]])->daily()->at('03:30');
+// También barre los tokens de venta caducados hace más de un día.
+Schedule::command('model:prune', ['--model' => [\App\Models\Redemption::class, \App\Models\SaleToken::class]])->daily()->at('03:30');
 
 // Marca como `expired` las tarjetas que ya no pueden sellar y reinicia los sellos
 // vencidos (CARD_STAMPS_LIFETIME_DAYS / settings.stamps_lifetime_days).

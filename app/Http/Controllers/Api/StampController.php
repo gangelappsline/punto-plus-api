@@ -8,6 +8,7 @@ use App\Http\Resources\StampResource;
 use App\Models\Stamp;
 use App\Services\CustomerCardService;
 use App\Services\StampService;
+use App\Support\CustomerCardSummary;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -51,21 +52,7 @@ class StampController extends Controller
                 'message' => $card->isSpend()
                     ? sprintf('Compra registrada: %d puntos.', (int) $stamp->points_awarded)
                     : 'Sello registrado.',
-                'customer_card' => [
-                    'id' => $card->getKey(),
-                    'code' => $card->code,
-                    'progress_unit' => $card->progressUnit(),
-                    'stamps_count' => (int) $card->stamps_count,
-                    'required_stamps' => (int) $card->required_stamps,
-                    'points_count' => (int) $card->points_count,
-                    'total_points_earned' => (int) $card->total_points_earned,
-                    'progress_percentage' => $card->progress_percentage,
-                    'progress' => $card->progress,
-                    'status' => $card->status->value,
-                    'reward_available' => $card->isSpend()
-                        ? $card->available_rewards->isNotEmpty()
-                        : $card->isCompleted(),
-                ],
+                'customer_card' => CustomerCardSummary::for($card),
             ])
             ->response()
             ->setStatusCode(201);
@@ -98,7 +85,7 @@ class StampController extends Controller
         $filters = $request->validate([
             'loyalty_card_id' => ['nullable', 'uuid'],
             'customer_card_id' => ['nullable', 'uuid'],
-            'source' => ['nullable', 'string', 'in:scan,manual,import,adjustment'],
+            'source' => ['nullable', 'string', 'in:scan,manual,import,adjustment,token'],
             'from' => ['nullable', 'date'],
             'to' => ['nullable', 'date'],
             'per_page' => ['nullable', 'integer', 'min:1', 'max:'.config('punto_plus.per_page.max')],

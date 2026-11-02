@@ -29,9 +29,12 @@ final class StampService
     /**
      * Registra un sello y actualiza el progreso de la tarjeta.
      *
+     * `$staff` es el usuario del negocio que lo registra; puede ser null cuando
+     * la venta la dispara el cliente con un token y el usuario ya no existe.
+     *
      * @param  array<string, mixed>  $data
      */
-    public function register(Business $business, CustomerCard $card, User $staff, array $data = []): Stamp
+    public function register(Business $business, CustomerCard $card, ?User $staff = null, array $data = []): Stamp
     {
         $this->assertCardBelongsToBusiness($card, $business);
         $this->assertCardIsUsable($card);
@@ -73,13 +76,13 @@ final class StampService
                 'customer_card_id' => $locked->getKey(),
                 'business_id' => $business->getKey(),
                 'loyalty_card_id' => $locked->loyalty_card_id,
-                'registered_by' => $staff->getKey(),
+                'registered_by' => $staff?->getKey(),
                 'source' => $data['source'] ?? StampSource::Scan,
                 'purchase_amount' => $data['purchase_amount'] ?? null,
                 'points_awarded' => $points,
                 'notes' => $data['notes'] ?? null,
                 'stamped_at' => $stampedAt,
-                'meta' => isset($data['idempotency_key']) ? ['idempotency_key' => $data['idempotency_key']] : null,
+                'meta' => self::meta($data),
             ]);
 
             $wasCompleted = $locked->status === CardStatus::Completed;
@@ -161,6 +164,28 @@ final class StampService
         StampVoided::dispatch($stamp);
 
         return $stamp;
+    }
+
+    /**
+     * Metadatos del sello: clave de idempotencia y datos extra (por ejemplo el
+     * código del token de venta que lo originó).
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>|null
+     */
+    private static function meta(array $data): ?array
+    {
+        $meta = [];
+
+        if (isset($data['idempotency_key'])) {
+            $meta['idempotency_key'] = $data['idempotency_key'];
+        }
+
+        if (isset($data['meta']) && is_array($data['meta'])) {
+            $meta = array_merge($meta, $data['meta']);
+        }
+
+        return $meta === [] ? null : $meta;
     }
 
     // -----------------------------------------------------------------
