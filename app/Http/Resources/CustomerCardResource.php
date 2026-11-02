@@ -8,6 +8,9 @@ use Illuminate\Http\Resources\Json\JsonResource;
 /**
  * Tarjeta del cliente con su progreso actual.
  *
+ * `progress.unit` indica si el programa avanza por `visits` o por `points`;
+ * `cycle` contiene la vigencia del ciclo cuando la tarjeta la define.
+ *
  * @mixin \App\Models\CustomerCard
  */
 class CustomerCardResource extends JsonResource
@@ -25,11 +28,15 @@ class CustomerCardResource extends JsonResource
             'business_id' => $this->business_id,
 
             // --- Progreso ---
+            'progress_unit' => $this->progressUnit(),
             'stamps_count' => (int) $this->stamps_count,
             'required_stamps' => (int) $this->required_stamps,
             'stamps_remaining' => (int) $this->stamps_remaining,
+            'points_count' => (int) $this->points_count,
+            'total_points_earned' => (int) $this->total_points_earned,
             'progress_percentage' => $this->progress_percentage,
             'progress' => $this->progress,
+            'cycle' => $this->cycle,
 
             'status' => $this->status->value,
             'status_label' => $this->status->label(),

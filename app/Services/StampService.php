@@ -46,10 +46,28 @@ final class StampService
 
         $this->assertNotThrottled($card, $stampedAt);
         $this->assertDailyLimitNotReached($card);
+        $this->assertPurchaseAmountIsValid($card, $data);
 
         $outcome = DB::transaction(function () use ($business, $card, $staff, $data, $stampedAt): array {
             /** @var CustomerCard $locked */
             $locked = CustomerCard::whereKey($card->getKey())->lockForUpdate()->firstOrFail();
+            $loyaltyCard = $locked->loyaltyCard;
+
+            // Si el ciclo venció (tarjetas "en un lapso de días") arranca uno nuevo
+            // antes de sumar esta compra.
+            $cycleRestarted = false;
+
+            if ($locked->cycle_expires_at !== null && $locked->cycle_expires_at->isPast()) {
+                $locked->resetCycle($stampedAt);
+                $cycleRestarted = true;
+            } elseif ($locked->cycle_started_at === null && $loyaltyCard?->hasPeriod()) {
+                $locked->startCycle($stampedAt);
+            }
+
+            // Tarjetas por consumo: los puntos los define la tarjeta del negocio.
+            $points = $locked->isSpend()
+                ? (int) $loyaltyCard?->pointsForAmount((float) $data['purchase_amount'])
+                : 0;
 
             $stamp = Stamp::create([
                 'customer_card_id' => $locked->getKey(),
@@ -58,6 +76,7 @@ final class StampService
                 'registered_by' => $staff->getKey(),
                 'source' => $data['source'] ?? StampSource::Scan,
                 'purchase_amount' => $data['purchase_amount'] ?? null,
+                'points_awarded' => $points,
                 'notes' => $data['notes'] ?? null,
                 'stamped_at' => $stampedAt,
                 'meta' => isset($data['idempotency_key']) ? ['idempotency_key' => $data['idempotency_key']] : null,
@@ -67,9 +86,13 @@ final class StampService
 
             $locked->stamps_count = $locked->stamps_count + 1;
             $locked->total_stamps_earned = $locked->total_stamps_earned + 1;
+            $locked->points_count = $locked->points_count + $points;
+            $locked->total_points_earned = $locked->total_points_earned + $points;
             $locked->last_stamp_at = $stampedAt;
 
-            if ($locked->stamps_count >= $locked->required_stamps) {
+            // Las tarjetas por consumo nunca se "completan": acumulan puntos y el
+            // cliente canjea cuando alcanza el umbral de alguna recompensa.
+            if (! $locked->isSpend() && $locked->stamps_count >= $locked->required_stamps) {
                 $locked->status = CardStatus::Completed;
                 $locked->completed_at ??= now();
 
@@ -81,7 +104,13 @@ final class StampService
 
             $locked->save();
 
-            return ['stamp' => $stamp, 'card' => $locked, 'newly_completed' => ! $wasCompleted];
+            return [
+                'stamp' => $stamp,
+                'card' => $locked,
+                'newly_completed' => ! $wasCompleted,
+                'points_awarded' => $points,
+                'cycle_restarted' => $cycleRestarted,
+            ];
         }, 3);
 
         /** @var Stamp $stamp */
@@ -91,7 +120,7 @@ final class StampService
 
         StampRegistered::dispatch($stamp);
 
-        if ($outcome['newly_completed'] && $updated->stamps_count >= $updated->required_stamps) {
+        if ($outcome['newly_completed'] && ! $updated->isSpend() && $updated->stamps_count >= $updated->required_stamps) {
             CardCompleted::dispatch($updated, $updated->loyaltyCard?->rewardFor($updated->stamps_count));
         }
 
@@ -116,7 +145,12 @@ final class StampService
             $card->stamps_count = max(0, $card->stamps_count - 1);
             $card->total_stamps_earned = max(0, $card->total_stamps_earned - 1);
 
-            if ($card->stamps_count < $card->required_stamps) {
+            // En las tarjetas por consumo también se revierten los puntos.
+            $points = (int) $stamp->points_awarded;
+            $card->points_count = max(0, $card->points_count - $points);
+            $card->total_points_earned = max(0, $card->total_points_earned - $points);
+
+            if (! $card->isSpend() && $card->stamps_count < $card->required_stamps) {
                 $card->status = CardStatus::Active;
                 $card->completed_at = null;
             }
@@ -172,6 +206,39 @@ final class StampService
                 'code' => sprintf(
                     'Espera %d segundos antes de registrar otro sello en esta tarjeta.',
                     $seconds - max(0, $elapsed),
+                ),
+            ]);
+        }
+    }
+
+    /**
+     * En las tarjetas por consumo el monto de la compra es obligatorio y debe
+     * alcanzar al menos un bloque de gasto.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    private function assertPurchaseAmountIsValid(CustomerCard $card, array $data): void
+    {
+        if (! $card->isSpend()) {
+            return;
+        }
+
+        $amount = $data['purchase_amount'] ?? null;
+
+        if ($amount === null || $amount === '') {
+            throw ValidationException::withMessages([
+                'purchase_amount' => 'Esta tarjeta acumula puntos por consumo: indica el monto de la compra.',
+            ]);
+        }
+
+        $loyaltyCard = $card->loyaltyCard;
+
+        if ($loyaltyCard !== null && $loyaltyCard->pointsForAmount((float) $amount) <= 0) {
+            throw ValidationException::withMessages([
+                'purchase_amount' => sprintf(
+                    'El monto no genera puntos: cada $%s de consumo suma %d puntos.',
+                    number_format((float) $loyaltyCard->spend_amount_per_block, 2, '.', ','),
+                    (int) $loyaltyCard->points_per_block,
                 ),
             ]);
         }

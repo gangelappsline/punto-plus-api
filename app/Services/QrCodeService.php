@@ -42,6 +42,7 @@ final class QrCodeService
             'loyalty_card_id' => $card->getKey(),
             'business_id' => $card->business_id,
             'business' => $card->relationLoaded('business') ? $card->business?->name : null,
+            'card_type' => $card->type->value,
             'url' => $card->join_url,
         ]);
     }
@@ -58,8 +59,13 @@ final class QrCodeService
             'loyalty_card_id' => $card->loyalty_card_id,
             'business_id' => $card->business_id,
             'holder' => $card->relationLoaded('user') ? $card->user?->name : null,
+            // Tarjetas por visitas: sellos. Por consumo: puntos (las claves de sellos
+            // se mantienen por compatibilidad con las apps ya publicadas).
+            'progress_unit' => $card->progressUnit(),
             'stamps' => (int) $card->stamps_count,
             'required_stamps' => (int) $card->required_stamps,
+            'points' => (int) $card->points_count,
+            'total_points_earned' => (int) $card->total_points_earned,
         ]);
     }
 

@@ -72,18 +72,29 @@ final class CustomerCardService
                     $this->refreshStatus($existing);
                 }
 
+                if ($existing->cycle_started_at === null && $card->hasPeriod()) {
+                    $existing->startCycle()->save();
+                }
+
                 return $existing;
             }
 
-            return CustomerCard::create([
+            $customerCard = new CustomerCard([
                 'user_id' => $user->getKey(),
                 'loyalty_card_id' => $card->getKey(),
                 'business_id' => $card->business_id,
                 'stamps_count' => 0,
                 'total_stamps_earned' => 0,
+                'points_count' => 0,
+                'total_points_earned' => 0,
                 'status' => CardStatus::Active,
                 'expires_at' => $card->expires_at,
-            ])->load(['loyaltyCard.business', 'business']);
+            ]);
+
+            // Arranca el ciclo (y su caducidad si la tarjeta define un lapso de días).
+            $customerCard->startCycle()->save();
+
+            return $customerCard->load(['loyaltyCard.business', 'business']);
         }, 3);
     }
 
@@ -155,11 +166,26 @@ final class CustomerCardService
     }
 
     /**
-     * Recalcula el estado de la tarjeta a partir de su contador de sellos.
+     * Recalcula el estado de la tarjeta.
+     *
+     * Las tarjetas por consumo nunca pasan a `completed`: el cliente acumula
+     * puntos y canjea por niveles.
      */
     public function refreshStatus(CustomerCard $card): CustomerCard
     {
-        $required = $card->required_stamps;
+        if ($card->isSpend()) {
+            // Se respetan los estados manuales (bloqueada/caducada).
+            if (in_array($card->status, [CardStatus::Active, CardStatus::Completed], true)) {
+                $card->status = CardStatus::Active;
+            }
+
+            $card->completed_at = null;
+            $card->save();
+
+            return $card;
+        }
+
+        $required = max(1, (int) $card->required_stamps);
 
         $card->status = $card->stamps_count >= $required
             ? CardStatus::Completed

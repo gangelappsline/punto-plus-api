@@ -24,6 +24,7 @@ class RewardFactory extends Factory
             'reward_type' => RewardType::FreeProduct,
             'value' => null,
             'required_stamps' => fn (array $attributes) => (int) (LoyaltyCard::find($attributes['loyalty_card_id'])?->required_stamps ?? 10),
+            'points_required' => null,
             'stock' => null,
             'is_active' => true,
         ];
@@ -35,6 +36,20 @@ class RewardFactory extends Factory
             'loyalty_card_id' => $card->getKey(),
             'business_id' => $card->business_id,
             'required_stamps' => $requiredStamps ?? $card->required_stamps,
+        ]);
+    }
+
+    /**
+     * Recompensa de una tarjeta por consumo (umbral en puntos).
+     */
+    public function forSpendCard(LoyaltyCard $card, int $pointsRequired, string $name = 'Recompensa'): static
+    {
+        return $this->state(fn (): array => [
+            'loyalty_card_id' => $card->getKey(),
+            'business_id' => $card->business_id,
+            'name' => $name,
+            'required_stamps' => null,
+            'points_required' => $pointsRequired,
         ]);
     }
 }

@@ -12,6 +12,7 @@ use App\Models\Reward;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Recompensas asociadas a cada tarjeta de fidelidad.
@@ -28,7 +29,7 @@ class RewardController extends Controller
         $rewards = $loyaltyCard->rewards()
             ->when($request->has('is_active'), fn ($query) => $query->where('is_active', $request->boolean('is_active')))
             ->withCount('redemptions')
-            ->orderBy('required_stamps')
+            ->orderedByThreshold()
             ->get();
 
         return RewardResource::collection($rewards);
@@ -42,6 +43,21 @@ class RewardController extends Controller
         $this->authorize('manageRewards', $loyaltyCard);
 
         $data = $request->validated();
+        $isSpend = $loyaltyCard->isSpend();
+
+        // El umbral se mide en visitas o en puntos según el tipo de tarjeta.
+        $thresholdColumn = $isSpend ? 'points_required' : 'required_stamps';
+        $threshold = $isSpend
+            ? ($data['points_required'] ?? null)
+            : ($data['required_stamps'] ?? $loyaltyCard->required_stamps);
+
+        if ($threshold !== null && $loyaltyCard->rewards()->where($thresholdColumn, $threshold)->exists()) {
+            throw ValidationException::withMessages([
+                $thresholdColumn => $isSpend
+                    ? 'Ya existe una recompensa con esos puntos.'
+                    : 'Ya existe una recompensa con esas visitas.',
+            ]);
+        }
 
         $reward = $loyaltyCard->rewards()->create([
             'business_id' => $loyaltyCard->business_id,
@@ -49,7 +65,8 @@ class RewardController extends Controller
             'description' => $data['description'] ?? null,
             'reward_type' => $data['reward_type'] ?? RewardType::FreeProduct,
             'value' => $data['value'] ?? null,
-            'required_stamps' => $data['required_stamps'] ?? $loyaltyCard->required_stamps,
+            'required_stamps' => $isSpend ? null : $threshold,
+            'points_required' => $isSpend ? $threshold : null,
             'stock' => $data['stock'] ?? null,
             'is_active' => $data['is_active'] ?? true,
         ]);
@@ -64,7 +81,16 @@ class RewardController extends Controller
     {
         $this->authorize('update', $reward);
 
-        $reward->fill($request->validated())->save();
+        $data = $request->validated();
+
+        // Se descarta el umbral que no corresponde al tipo de tarjeta.
+        if ($reward->loyaltyCard?->isSpend()) {
+            unset($data['required_stamps']);
+        } else {
+            unset($data['points_required']);
+        }
+
+        $reward->fill($data)->save();
 
         return new RewardResource($reward->load('loyaltyCard'));
     }

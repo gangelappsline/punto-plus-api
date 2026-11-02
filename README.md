@@ -167,12 +167,12 @@ nunca puede leer tarjetas de otro cliente ni datos de un negocio.
 | `menu_categories` | id | Tabla histórica; los endpoints actuales ya no la usan | legado |
 | `product_presentations` | **uuid** | Presentaciones del producto con precio opcional que puede heredar el precio base | `product_id` → cascade |
 | `product_images` | id | De 1 a 5 imágenes públicas ordenadas por producto | `product_id` → cascade |
-| `loyalty_cards` | **uuid** | Tarjeta de sellos del negocio (`required_stamps`, `join_code`, colores, assets) | `business_id` → **cascade** |
-| `rewards` | **uuid** | Premio al completar un ciclo (`required_stamps`, `stock`) | `loyalty_card_id` → **cascade** |
-| `promotions` | **uuid** | Promociones del negocio (opcionalmente ligadas a una tarjeta) | `business_id` → **cascade** |
-| `customer_cards` | **uuid** | Tarjeta de un cliente (progreso, `status`, `code`) | `user_id`/`loyalty_card_id`/`business_id` → **cascade** |
-| `stamps` | **uuid** | Compra escaneada (`source`, `purchase_amount`, `stamped_at`) | `customer_card_id` → **cascade** |
-| `redemptions` | **uuid** | Canjes (`code`, `status`, `stamps_used`) | `customer_card_id` → **cascade** |
+| `loyalty_cards` | **uuid** | Tarjeta del negocio: `type` (`visits`/`spend`), `required_stamps`, configuración de puntos (`spend_amount_per_block`, `points_per_block`, `currency`) y vigencia del ciclo (`period_type`, `period_days`) | `business_id` → **cascade** |
+| `rewards` | **uuid** | Recompensa o nivel de la tarjeta: `required_stamps` (visitas) o `points_required` (puntos), `stock`, `redemptions_count` | `loyalty_card_id` → **cascade** |
+| `promotions` | **uuid** | Avisos del negocio: `schedule_type` (`indefinite`/`date_range`/`time_range`), `days_of_week` (JSON ISO-8601), `start_time`/`end_time`, `starts_at`/`ends_at` | `business_id` → **cascade** |
+| `customer_cards` | **uuid** | Tarjeta de un cliente: visitas (`stamps_count`), puntos (`points_count`, `total_points_earned`), `status`, `code` y ciclo (`cycle_started_at`, `cycle_expires_at`) | `user_id`/`loyalty_card_id`/`business_id` → **cascade** |
+| `stamps` | **uuid** | Compra escaneada (`source`, `purchase_amount`, `points_awarded`, `stamped_at`) | `customer_card_id` → **cascade** |
+| `redemptions` | **uuid** | Canjes (`code`, `status`, `stamps_used` o `points_used`) | `customer_card_id` → **cascade** |
 | `whatsapp_messages` | **uuid** | Envíos de WhatsApp, mensajes entrantes y acuses de entrega/lectura (`direction`, `status`, `wa_message_id`) | `business_id` → null on delete |
 | `oauth_*` | | Tablas de Passport (clientes, tokens, códigos) | — |
 
@@ -255,8 +255,8 @@ En `PUT /api/business/card`, el paso `information` acepta `logo_url` y `backgrou
 | `GET` / `PUT` / `PATCH` / `DELETE` | `/api/business/menu/products/{product}` | Consultar/editar/eliminar producto; `images` reemplaza todas las fotos si se envía |
 | `GET` / `POST` | `/api/business/menu/products/{product}/presentations` | Listar/crear presentaciones y sus precios opcionales |
 | `GET` / `PUT` / `PATCH` / `DELETE` | `/api/business/menu/products/{product}/presentations/{presentation}` | Consultar/editar/eliminar presentación |
-| `GET` | `/api/business/cards` | Listar tarjetas del negocio |
-| `POST` | `/api/business/cards` | Crear tarjeta (opcionalmente con `rewards[]`) |
+| `GET` | `/api/business/cards` | Listar tarjetas del negocio (`?type=`, `?period_type=`) |
+| `POST` | `/api/business/cards` | Crear tarjeta: `type=visits` (visitas) o `type=spend` (puntos), con `rewards[]` opcional/los niveles de puntos |
 | `GET` | `/api/business/cards/{card}` | Detalle de la tarjeta |
 | `PUT` | `/api/business/cards/{card}` | Editar tarjeta |
 | `DELETE` | `/api/business/cards/{card}` | Archivar tarjeta |
@@ -269,12 +269,12 @@ En `PUT /api/business/card`, el paso `information` acepta `logo_url` y `backgrou
 | `POST` | `/api/business/cards/{card}/rewards` | Crear recompensa |
 | `PUT` | `/api/business/rewards/{reward}` | Editar recompensa |
 | `DELETE` | `/api/business/rewards/{reward}` | Eliminar recompensa |
-| `GET` | `/api/business/promotions` | Listar promociones |
-| `POST` | `/api/business/promotions` | Crear promoción |
+| `GET` | `/api/business/promotions` | Listar promociones (`?schedule_type=`, `?available_now=true`) |
+| `POST` | `/api/business/promotions` | Crear promoción (`schedule_type`: `indefinite`, `date_range` o `time_range`) |
 | `GET` | `/api/business/promotions/{promotion}` | Detalle |
 | `PUT` | `/api/business/promotions/{promotion}` | Editar |
 | `DELETE` | `/api/business/promotions/{promotion}` | Eliminar |
-| `POST` | `/api/business/stamps/scan` | **Registrar sello** escaneando el QR del cliente |
+| `POST` | `/api/business/stamps/scan` | **Registrar compra** escaneando el QR del cliente (sello o puntos; `purchase_amount` obligatorio en tarjetas por consumo) |
 | `GET` | `/api/business/stamps/recent` | Últimos escaneos |
 | `GET` | `/api/business/stamps` | Historial de sellos con filtros |
 | `DELETE` | `/api/business/stamps/{stamp}` | Anular sello (revierte el progreso) |
@@ -424,6 +424,38 @@ Ejemplo de actualización parcial:
 - **Idempotencia**: `join` es idempotente (devuelve `already_joined: true` y la tarjeta con su
   progreso intacto, incluso si el cliente había salido del programa).
 
+### 8.1 Dos tipos de tarjeta (`loyalty_cards.type`)
+
+| | `visits` — por cantidad de visitas | `spend` — por consumo (puntos) |
+|---|---|---|
+| Progreso | `customer_cards.stamps_count` (+1 por compra) | `customer_cards.points_count` (`floor(monto / spend_amount_per_block) * points_per_block`) |
+| Meta | `required_stamps` de la tarjeta | `rewards.points_required` de cada nivel |
+| Recompensas | una por ciclo (`rewards.required_stamps`) | varias, una por umbral de puntos (200 pts → refresco, 500 pts → hamburguesa) |
+| Vigencia | `period_type` + `period_days` (o `unlimited`) | igual |
+| Al canjear | descuenta sellos (y reinicia el ciclo si `CARD_RESET_PROGRESS_ON_REDEEM`) | descuenta exactamente los puntos del nivel y conserva el saldo |
+
+- `GET /api/business/cards?type=spend` filtra por tipo; el detalle expone `type`, `progress_unit`
+  y `reward_threshold_field` para que el front sepa qué campo mostrar.
+- `rewards.required_stamps` y `redemptions.points_used` quedan en `null`/`0` cuando no aplican.
+- `PUT /api/business/cards/{card}` sólo permite cambiar `type` mientras la tarjeta no tenga clientes
+  ni recompensas (el progreso depende del tipo); devuelve `422` explicando qué eliminar primero.
+- Al caducar el ciclo (`period_days`), la siguiente compra reinicia el contador y abre un ciclo nuevo
+  (`customer_cards.cycle_started_at` / `cycle_expires_at`).
+
+### 8.2 Tres formas de programar una promoción (`promotions.schedule_type`)
+
+| `schedule_type` | Campos obligatorios | Ejemplo |
+|---|---|---|
+| `indefinite` | `days_of_week` | Aviso permanente los martes |
+| `date_range` | `starts_at`, `ends_at` | Promoción navideña del 1 al 24 de diciembre |
+| `time_range` | `days_of_week`, `start_time`, `end_time` | Hora feliz viernes y sábado de 18:00 a 21:00 |
+
+- `days_of_week` es una lista ISO-8601: **1 = lunes … 7 = domingo**.
+- `start_time`/`end_time` usan `HH:MM` (24 h) y la franja puede cruzar la medianoche (`20:00`–`02:00`).
+- `Promotion::isAvailableNow()` evalúa tipo + día + fecha + hora; se expone como `is_available_now`
+  y `schedule.is_available_now`. `?available_now=true` filtra el listado.
+- Los campos que no aplican al tipo se guardan en `null` (una promoción indefinida no tiene fechas).
+
 ## 9. Errores
 
 | HTTP | `error` | Cuándo |
@@ -519,7 +551,8 @@ plantillas, modo Live y errores frecuentes.
 ```text
 app/
 ├── Console/Commands/                          # punto-plus:oauth-clients, expire-cards, whatsapp-test
-├── Enums/                                     # UserRole, CardStatus, WhatsAppStatus, ...
+├── Enums/                                     # UserRole, CardStatus, LoyaltyCardType, CardPeriodType,
+│                                              # PromotionScheduleType, WhatsAppStatus, ...
 ├── Events/ + Listeners/                       # CardCompleted, StampRegistered, ...
 ├── Exceptions/                                # OAuthConfigurationException, WhatsAppException
 ├── Http/
@@ -539,8 +572,10 @@ app/
 │   ├── RedemptionService.php  StampService.php
 │   ├── OAuth/TokenBroker.php                  # password/refresh grant desde la API
 │   └── WhatsApp/{WhatsAppClient,WhatsAppMessenger}.php
-└── Support/                                   # Media, PhoneNumber, OAuth/TokenResponse
+└── Support/                                   # Media, PhoneNumber, PromotionSchedule, OAuth/TokenResponse
 docs/whatsapp.md                               # guía de configuración en Meta
+docs/tarjetas-y-promociones.md                 # qué enviar para cada tipo de tarjeta y promoción
+public/docs/openapi.yaml                       # contrato OpenAPI 3.0 (Swagger)
 ```
 
 ## 14. Licencia

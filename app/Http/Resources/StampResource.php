@@ -23,6 +23,7 @@ class StampResource extends JsonResource
             'source' => $this->source->value,
             'source_label' => $this->source->label(),
             'purchase_amount' => $this->purchase_amount,
+            'points_awarded' => (int) $this->points_awarded,
             'notes' => $this->notes,
             'stamped_at' => $this->stamped_at?->toIso8601String(),
             'registered_by' => new UserResource($this->whenLoaded('registeredBy')),

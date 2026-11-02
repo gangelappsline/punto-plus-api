@@ -19,7 +19,7 @@ use Illuminate\Support\Str;
  */
 #[Fillable([
     'customer_card_id', 'reward_id', 'business_id', 'user_id', 'code', 'status',
-    'stamps_used', 'redeemed_at', 'approved_by', 'approved_at', 'notes',
+    'stamps_used', 'points_used', 'redeemed_at', 'approved_by', 'approved_at', 'notes',
 ])]
 class Redemption extends Model
 {
@@ -41,6 +41,7 @@ class Redemption extends Model
         return [
             'status' => RedemptionStatus::class,
             'stamps_used' => 'integer',
+            'points_used' => 'integer',
             'redeemed_at' => 'datetime',
             'approved_at' => 'datetime',
         ];

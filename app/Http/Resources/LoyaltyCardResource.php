@@ -8,6 +8,10 @@ use Illuminate\Http\Resources\Json\JsonResource;
 /**
  * Tarjeta de fidelidad con sus assets (logo, fondo e icono de sello).
  *
+ * `type` distingue los dos tipos de programa:
+ *  - `visits`: progreso por visitas (`required_stamps` + vigencia opcional);
+ *  - `spend`: progreso por puntos (`spend_amount_per_block` → `points_per_block`).
+ *
  * @mixin \App\Models\LoyaltyCard
  */
 class LoyaltyCardResource extends JsonResource
@@ -23,7 +27,29 @@ class LoyaltyCardResource extends JsonResource
             'name' => $this->name,
             'slug' => $this->slug,
             'description' => $this->description,
-            'required_stamps' => (int) $this->required_stamps,
+
+            // --- Tipo de programa ---
+            'type' => $this->type->value,
+            'type_label' => $this->type->label(),
+            'progress_unit' => $this->progressUnit(),
+            // Campo de `rewards` que define el umbral según el tipo.
+            'reward_threshold_field' => $this->type->rewardThresholdColumn(),
+
+            // --- Configuración por visitas ---
+            'required_stamps' => $this->required_stamps === null ? null : (int) $this->required_stamps,
+
+            // --- Configuración por consumo ---
+            'currency' => $this->currency,
+            'spend_amount_per_block' => $this->spend_amount_per_block === null
+                ? null
+                : (float) $this->spend_amount_per_block,
+            'points_per_block' => $this->points_per_block === null ? null : (int) $this->points_per_block,
+
+            // --- Vigencia del ciclo ---
+            'period_type' => $this->period_type->value,
+            'period_type_label' => $this->period_type->label(),
+            'period_days' => $this->period_days === null ? null : (int) $this->period_days,
+
             'reward_description' => $this->reward_description,
             'terms' => $this->terms,
 

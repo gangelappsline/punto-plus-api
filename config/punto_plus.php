@@ -116,6 +116,28 @@ return [
         'max_required_stamps' => 100,
 
         /*
+         | Tarjetas por consumo (puntos): cada bloque de gasto otorga N puntos y
+         | las recompensas se desbloquean por umbrales de puntos.
+         */
+        'default_currency' => env('CARD_DEFAULT_CURRENCY', 'MXN'),
+        'default_points_per_block' => (int) env('CARD_DEFAULT_POINTS_PER_BLOCK', 10),
+        'min_points_per_block' => 1,
+        'max_points_per_block' => 10000,
+        'max_spend_amount_per_block' => 999999.99,
+        'min_points_required' => 1,
+        'max_points_required' => 1000000,
+
+        /*
+         | Vigencia del ciclo (tarjetas "en un lapso de días").
+         */
+        'max_period_days' => 3650,
+
+        /*
+         | Recompensas por tarjeta (niveles de puntos).
+         */
+        'max_rewards' => (int) env('CARD_MAX_REWARDS', 20),
+
+        /*
          | Anti-fraude: segundos mínimos entre dos sellos de la misma tarjeta.
          */
         'stamp_throttle_seconds' => (int) env('CARD_STAMP_THROTTLE_SECONDS', 30),
