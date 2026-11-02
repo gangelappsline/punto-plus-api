@@ -13,6 +13,60 @@ use Throwable;
 class PromotionSchedule
 {
     /**
+     * Campos que describen la programación de una promoción.
+     *
+     * @var list<string>
+     */
+    public const FIELDS = ['schedule_type', 'days_of_week', 'start_time', 'end_time', 'starts_at', 'ends_at'];
+
+    /**
+     * ¿La petición envía algún campo de programación?
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public static function touches(array $data): bool
+    {
+        foreach (self::FIELDS as $field) {
+            if (array_key_exists($field, $data)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Deduce el tipo de programación cuando el front no lo envía.
+     *
+     * El formulario del negocio no siempre manda `schedule_type`: se deduce de
+     * los datos que sí manda. Sin fechas ni horas la promoción es de tiempo
+     * indefinido (por eso no se le exigen fechas), con fechas es por rango de
+     * fechas y con horas es por rango de hora.
+     *
+     * @param  array<string, mixed>  $data
+     */
+    public static function resolveType(mixed $explicit, array $data, mixed $fallback = null): PromotionScheduleType
+    {
+        $type = $explicit instanceof PromotionScheduleType
+            ? $explicit
+            : PromotionScheduleType::tryFrom(is_string($explicit) ? $explicit : '');
+
+        if ($type !== null) {
+            return $type;
+        }
+
+        if (filled($data['start_time'] ?? null) || filled($data['end_time'] ?? null)) {
+            return PromotionScheduleType::TimeRange;
+        }
+
+        if (filled($data['starts_at'] ?? null) || filled($data['ends_at'] ?? null)) {
+            return PromotionScheduleType::DateRange;
+        }
+
+        return $fallback instanceof PromotionScheduleType ? $fallback : PromotionScheduleType::Indefinite;
+    }
+
+    /**
      * Atributos de programación listos para guardar.
      *
      * @param  array<string, mixed>  $data

@@ -42,6 +42,16 @@ info:
 
     Los días de la semana usan ISO-8601: **1 = lunes … 7 = domingo**. Los request bodies
     incluyen ejemplos completos para cada variante.
+
+    `schedule_type` es **opcional**: si no se envía se deduce de los datos. Sin
+    `starts_at`/`ends_at` ni horas la promoción es de **tiempo indefinido** y no se
+    exigen fechas; enviando fechas se guarda como `date_range` y enviando horas como
+    `time_range`. `days_of_week` también es opcional (vacío = todos los días).
+
+    El **banner** se envía como imagen en base64 (`banner`, con o sin prefijo
+    `data:image/png;base64,`). El API lo convierte, lo guarda en el disco `public`
+    (carpeta `promotions/{id}/banner`) y devuelve la ruta en `image_path` y la URL
+    pública en `image_url`.
   contact:
     name: Punto Plus
     email: hola@puntoplus.test
@@ -1386,17 +1396,23 @@ paths:
 
         | `schedule_type` | Campos obligatorios | Ejemplo |
         | --- | --- | --- |
-        | `indefinite` | `days_of_week` | Aviso permanente de lunes a viernes |
+        | `indefinite` | *(ninguno)* | Aviso permanente de lunes a viernes (o todos los días) |
         | `date_range` | `starts_at`, `ends_at` | Promoción navideña del 1 al 24 de diciembre |
-        | `time_range` | `days_of_week`, `start_time`, `end_time` | Hora feliz viernes y sábado de 18:00 a 21:00 |
+        | `time_range` | `start_time`, `end_time` | Hora feliz viernes y sábado de 18:00 a 21:00 |
 
+        - `schedule_type` es opcional: se deduce de las fechas/horas enviadas y, si no
+          hay ninguna, la promoción queda como **tiempo indefinido** (sin fechas).
         - `days_of_week` usa ISO-8601: **1 = lunes … 7 = domingo** (arreglo de 1 a 7 días).
+          Es opcional: si no se envía, la promoción aplica todos los días.
         - `start_time`/`end_time` van en formato **HH:MM** (24 h) y la franja puede
           cruzar la medianoche (por ejemplo `20:00` → `02:00`).
         - Los campos que no aplican a la programación elegida se ignoran y se guardan
           en `null` (una promoción indefinida no tiene fechas).
         - `is_available_now` y `schedule.is_available_now` de la respuesta ya evalúan
           día, fecha y hora con la hora del servidor.
+        - `banner` acepta una imagen en base64 (data URI `data:image/png;base64,…` o la
+          cadena base64). Se guarda en el disco `public` y se responde en `image_path`
+          (ruta relativa) e `image_url` (URL pública).
 
         Ejemplos completos: *indefinida*, *rangoDeFechas* y *rangoDeHora*.
       security: [{ OAuth2: [] }]
@@ -1411,6 +1427,8 @@ paths:
                 title: { type: string, maxLength: 150, example: 2x1 en cafés los martes }
                 description: { type: string, maxLength: 2000, nullable: true }
                 terms: { type: string, maxLength: 2000, nullable: true }
+                banner: { type: string, nullable: true, description: 'Imagen en base64 (data URI `data:image/png;base64,…` o base64 puro, JPEG/PNG/WEBP hasta 4 MB). Se guarda en el disco `public`.', example: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg…' }
+                remove_banner: { type: boolean, description: 'Elimina el banner actual (deja `image_path` en `null`).' }
                 loyalty_card_id: { type: string, format: uuid, nullable: true, description: 'Tarjeta a la que aplica (opcional)' }
                 discount_type: { type: string, enum: [percentage, fixed_amount, free_item, gift] }
                 discount_value: { type: number, nullable: true, description: 'Obligatorio si el descuento es `percentage` o `fixed_amount`.' }
@@ -1418,11 +1436,11 @@ paths:
 
                 # --- Programación ---
                 schedule_type: { $ref: '#/components/schemas/PromotionScheduleType' }
-                days_of_week: { type: array, items: { type: integer, minimum: 1, maximum: 7 }, minItems: 1, maxItems: 7, description: 'ISO-8601: 1 = lunes … 7 = domingo. Obligatorio en `indefinite` y `time_range`.', example: [5, 6] }
+                days_of_week: { type: array, items: { type: integer, minimum: 1, maximum: 7 }, minItems: 1, maxItems: 7, description: 'ISO-8601: 1 = lunes … 7 = domingo. Opcional: si se omite, aplica todos los días.', example: [5, 6] }
                 start_time: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$', nullable: true, description: 'HH:MM (24 h). Obligatorio en `time_range`.', example: '18:00' }
                 end_time: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$', nullable: true, description: 'HH:MM (24 h). Puede ser menor que `start_time` si cruza medianoche.', example: '21:00' }
-                starts_at: { type: string, format: date, nullable: true, description: 'Obligatorio en `date_range`. Se guarda al inicio del día.' }
-                ends_at: { type: string, format: date, nullable: true, description: 'Obligatorio en `date_range`. Se guarda al final del día.' }
+                starts_at: { type: string, format: date, nullable: true, description: 'Obligatorio en `date_range`. Se guarda al inicio del día. Déjalo en `null` para una promoción de tiempo indefinido.' }
+                ends_at: { type: string, format: date, nullable: true, description: 'Obligatorio en `date_range`. Se guarda al final del día. Déjalo en `null` para una promoción de tiempo indefinido.' }
 
                 max_redemptions: { type: integer, nullable: true }
                 is_active: { type: boolean, default: true }
@@ -1436,6 +1454,24 @@ paths:
                   discount_value: 50
                   schedule_type: indefinite
                   days_of_week: [2]
+              indefinidaSinFechas:
+                summary: Tiempo indefinido sin fechas (formulario del negocio)
+                description: |
+                  `starts_at` y `ends_at` en `null`: no se exigen fechas y la promoción
+                  queda como `indefinite`. El banner viaja en base64.
+                value:
+                  title: Regalo de bienvenida
+                  description: Muestra la promoción al registrarte
+                  banner: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUg…'
+                  loyalty_card_id: null
+                  discount_type: gift
+                  discount_value: null
+                  code: null
+                  terms: null
+                  starts_at: null
+                  ends_at: null
+                  max_redemptions: 2
+                  is_active: true
               rangoDeFechas:
                 summary: Por rango de fechas (temporada)
                 value:
@@ -1489,9 +1525,13 @@ paths:
       summary: Editar una promoción
       description: |
         Sólo se actualizan los campos enviados. Si se envía `schedule_type`, hay que
-        enviar también los campos que ese tipo necesita (`days_of_week`, fechas o
-        horas); si no se envía `schedule_type`, se conserva el actual y se normalizan
-        los campos de programación que sí se envíen.
+        enviar también los campos que ese tipo necesita (fechas u horas); si no se envía
+        `schedule_type`, se conserva el actual (o se deduce de las fechas/horas que sí
+        se envíen) y se normalizan los campos de programación presentes.
+
+        - `banner`: reemplaza el banner actual (base64). El archivo anterior se borra.
+        - `remove_banner: true`: elimina el banner y deja `image_path` en `null`.
+        - Enviar la misma `image_url` que ya tiene la promoción no cambia nada.
       security: [{ OAuth2: [] }]
       requestBody:
         required: true
@@ -1507,8 +1547,10 @@ paths:
                 discount_type: { type: string, enum: [percentage, fixed_amount, free_item, gift] }
                 discount_value: { type: number, nullable: true }
                 code: { type: string, maxLength: 32, nullable: true }
+                banner: { type: string, nullable: true, description: 'Nuevo banner en base64 (data URI o base64 puro). Reemplaza al anterior.' }
+                remove_banner: { type: boolean, description: 'Elimina el banner actual.' }
                 schedule_type: { $ref: '#/components/schemas/PromotionScheduleType' }
-                days_of_week: { type: array, items: { type: integer, minimum: 1, maximum: 7 }, minItems: 1, maxItems: 7, description: 'Obligatorio al pasar a `indefinite` o `time_range`.' }
+                days_of_week: { type: array, items: { type: integer, minimum: 1, maximum: 7 }, minItems: 1, maxItems: 7, description: 'Opcional: si se omite, aplica todos los días.' }
                 start_time: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$', nullable: true, description: 'HH:MM (24 h). Obligatorio al pasar a `time_range`.' }
                 end_time: { type: string, pattern: '^([01]\d|2[0-3]):[0-5]\d$', nullable: true }
                 starts_at: { type: string, format: date, nullable: true, description: 'Obligatorio al pasar a `date_range`.' }
@@ -2442,7 +2484,8 @@ components:
         loyalty_card_id: { type: string, format: uuid, nullable: true }
         title: { type: string, example: 2x1 en cafés los martes }
         description: { type: string, nullable: true }
-        image_url: { type: string, nullable: true }
+        image_url: { type: string, nullable: true, description: 'URL pública del banner (disco `public`)' }
+        image_path: { type: string, nullable: true, description: 'Ruta del banner dentro del disco `public`, p. ej. `promotions/{id}/banner/uuid.png`' }
         terms: { type: string, nullable: true }
         discount_type: { type: string, enum: [percentage, fixed_amount, free_item, gift] }
         discount_type_label: { type: string }

@@ -46,6 +46,14 @@ final class AssetService
     }
 
     /**
+     * Carpeta pública donde vive el banner de una promoción.
+     */
+    public function promotionBannerDirectory(string $promotionId): string
+    {
+        return 'promotions/'.$promotionId.'/banner';
+    }
+
+    /**
      * Decodifica una imagen base64 y la guarda en una carpeta del disco público.
      */
     public function storePublicBase64Image(string $encodedImage, string $directory): string

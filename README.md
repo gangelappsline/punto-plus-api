@@ -169,7 +169,7 @@ nunca puede leer tarjetas de otro cliente ni datos de un negocio.
 | `product_images` | id | De 1 a 5 imágenes públicas ordenadas por producto | `product_id` → cascade |
 | `loyalty_cards` | **uuid** | Tarjeta del negocio: `type` (`visits`/`spend`), `required_stamps`, configuración de puntos (`spend_amount_per_block`, `points_per_block`, `currency`) y vigencia del ciclo (`period_type`, `period_days`) | `business_id` → **cascade** |
 | `rewards` | **uuid** | Recompensa o nivel de la tarjeta: `required_stamps` (visitas) o `points_required` (puntos), `stock`, `redemptions_count` | `loyalty_card_id` → **cascade** |
-| `promotions` | **uuid** | Avisos del negocio: `schedule_type` (`indefinite`/`date_range`/`time_range`), `days_of_week` (JSON ISO-8601), `start_time`/`end_time`, `starts_at`/`ends_at` | `business_id` → **cascade** |
+| `promotions` | **uuid** | Avisos del negocio: `schedule_type` (`indefinite`/`date_range`/`time_range`), `days_of_week` (JSON ISO-8601), `start_time`/`end_time`, `starts_at`/`ends_at`, `image_path` (banner en el disco `public`) | `business_id` → **cascade** |
 | `customer_cards` | **uuid** | Tarjeta de un cliente: visitas (`stamps_count`), puntos (`points_count`, `total_points_earned`), `status`, `code` y ciclo (`cycle_started_at`, `cycle_expires_at`) | `user_id`/`loyalty_card_id`/`business_id` → **cascade** |
 | `stamps` | **uuid** | Compra escaneada (`source`, `purchase_amount`, `points_awarded`, `stamped_at`) | `customer_card_id` → **cascade** |
 | `redemptions` | **uuid** | Canjes (`code`, `status`, `stamps_used` o `points_used`) | `customer_card_id` → **cascade** |
@@ -446,15 +446,21 @@ Ejemplo de actualización parcial:
 
 | `schedule_type` | Campos obligatorios | Ejemplo |
 |---|---|---|
-| `indefinite` | `days_of_week` | Aviso permanente los martes |
+| `indefinite` | *(ninguno)* | Aviso permanente los martes (o todos los días) |
 | `date_range` | `starts_at`, `ends_at` | Promoción navideña del 1 al 24 de diciembre |
-| `time_range` | `days_of_week`, `start_time`, `end_time` | Hora feliz viernes y sábado de 18:00 a 21:00 |
+| `time_range` | `start_time`, `end_time` | Hora feliz viernes y sábado de 18:00 a 21:00 |
 
-- `days_of_week` es una lista ISO-8601: **1 = lunes … 7 = domingo**.
+- `schedule_type` es opcional: se deduce de `starts_at`/`ends_at` (→ `date_range`), de
+  `start_time`/`end_time` (→ `time_range`) o, si no hay ninguno, queda en `indefinite`.
+  Por eso una promoción **sin fechas** se guarda sin pedirlas (`PromotionSchedule::resolveType()`).
+- `days_of_week` es una lista ISO-8601: **1 = lunes … 7 = domingo**; es opcional (vacío = todos los días).
 - `start_time`/`end_time` usan `HH:MM` (24 h) y la franja puede cruzar la medianoche (`20:00`–`02:00`).
 - `Promotion::isAvailableNow()` evalúa tipo + día + fecha + hora; se expone como `is_available_now`
   y `schedule.is_available_now`. `?available_now=true` filtra el listado.
 - Los campos que no aplican al tipo se guardan en `null` (una promoción indefinida no tiene fechas).
+- **Banner**: se envía como imagen en base64 (`banner`), el API la guarda en el disco `public`
+  (`promotions/{id}/banner/…`) y persiste la ruta en `promotions.image_path`; la respuesta la
+  expone como `image_path` + `image_url`. `remove_banner: true` la elimina.
 
 ## 9. Errores
 
