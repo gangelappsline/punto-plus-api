@@ -85,19 +85,20 @@ final class SaleTokenService
     /**
      * Valida un token y registra la venta en la tarjeta del cliente.
      *
-     * Todo ocurre en una transacción: si el sello no se puede registrar (throttle,
-     * tope diario, tarjeta llena…) el token sigue vigente para reintentar.
+     * `$rawToken` es lo que envía la app: el código (`K7QM-2XPD`) o el contenido del
+     * QR. Todo ocurre en una transacción: si el sello no se puede registrar
+     * (throttle, tope diario, tarjeta llena…) el token sigue vigente para reintentar.
      *
      * @param  array<string, mixed>  $data
      * @return array{stamp: Stamp, card: CustomerCard, token: SaleToken}
      */
-    public function redeem(User $user, ?string $rawCode, array $data = []): array
+    public function redeem(User $user, ?string $rawToken, array $data = []): array
     {
-        $code = $this->normalizeCode($rawCode);
+        $code = $this->normalizeCode($rawToken);
 
         if ($code === '') {
             throw ValidationException::withMessages([
-                'code' => 'Escanea el QR del negocio o escribe el código del token.',
+                'token' => 'Escanea el QR del negocio o escribe el código del token.',
             ]);
         }
 
@@ -112,7 +113,7 @@ final class SaleTokenService
 
             if ($token === null) {
                 throw ValidationException::withMessages([
-                    'code' => $expired
+                    'token' => $expired
                         ? $this->expiredMessage($ttlMinutes)
                         : 'El código no es válido o ya se utilizó. Pide uno nuevo al negocio.',
                 ]);
@@ -120,7 +121,7 @@ final class SaleTokenService
 
             if ($token->isExpired()) {
                 throw ValidationException::withMessages([
-                    'code' => $this->expiredMessage($token->ttlMinutes()),
+                    'token' => $this->expiredMessage($token->ttlMinutes()),
                 ]);
             }
 
@@ -129,7 +130,7 @@ final class SaleTokenService
 
             if ($business === null || $loyaltyCard === null) {
                 throw ValidationException::withMessages([
-                    'code' => 'El programa de fidelidad de este código ya no está disponible.',
+                    'token' => 'El programa de fidelidad de este código ya no está disponible.',
                 ]);
             }
 
@@ -137,17 +138,23 @@ final class SaleTokenService
 
             $card = $this->customerCardFor($user, $loyaltyCard);
 
-            $stamp = $this->stamps->register(
-                business: $business,
-                card: $card,
-                staff: $token->createdBy,
-                data: [
-                    'source' => StampSource::Token,
-                    'purchase_amount' => $data['purchase_amount'] ?? $token->purchase_amount,
-                    'notes' => $token->notes,
-                    'meta' => ['sale_token_code' => $token->code],
-                ],
-            );
+            try {
+                $stamp = $this->stamps->register(
+                    business: $business,
+                    card: $card,
+                    staff: $token->createdBy,
+                    data: [
+                        'source' => StampSource::Token,
+                        'purchase_amount' => $data['purchase_amount'] ?? $token->purchase_amount,
+                        'notes' => $token->notes,
+                        'meta' => ['sale_token_code' => $token->code],
+                    ],
+                );
+            } catch (ValidationException $exception) {
+                // StampService reporta con la clave `code` (flujo de escaneo); aquí el
+                // cliente envió `token`, así que el error se devuelve con esa clave.
+                throw $this->rekey($exception);
+            }
 
             $token->delete();
 
@@ -228,19 +235,19 @@ final class SaleTokenService
     {
         if ($user->ownsBusiness($business) && ! config('punto_plus.sale_tokens.allow_self_redemption', false)) {
             throw ValidationException::withMessages([
-                'code' => 'No puedes validar un token de tu propio negocio.',
+                'token' => 'No puedes validar un token de tu propio negocio.',
             ]);
         }
 
         if (! $business->is_active) {
             throw ValidationException::withMessages([
-                'code' => 'Este negocio no está disponible en este momento.',
+                'token' => 'Este negocio no está disponible en este momento.',
             ]);
         }
 
         if (! $loyaltyCard->is_active || ($loyaltyCard->expires_at !== null && $loyaltyCard->expires_at->isPast())) {
             throw ValidationException::withMessages([
-                'code' => 'Este programa de fidelidad ya no está disponible.',
+                'token' => 'Este programa de fidelidad ya no está disponible.',
             ]);
         }
     }
@@ -263,6 +270,23 @@ final class SaleTokenService
 
         // Sin tarjeta: el negocio acaba de invitarle con el token (sólo programas públicos).
         return $this->cards->join($user, null, $loyaltyCard->getKey());
+    }
+
+    /**
+     * Renombra la clave `code` de los errores del sello a `token`.
+     */
+    private function rekey(ValidationException $exception): ValidationException
+    {
+        $errors = $exception->errors();
+
+        if (! array_key_exists('code', $errors)) {
+            return $exception;
+        }
+
+        $errors['token'] = array_merge($errors['token'] ?? [], $errors['code']);
+        unset($errors['code']);
+
+        return ValidationException::withMessages($errors);
     }
 
     /**
@@ -292,9 +316,9 @@ final class SaleTokenService
     /**
      * Código normalizado a partir del QR (JSON, deep link o texto) o del campo de texto.
      */
-    private function normalizeCode(?string $rawCode): string
+    private function normalizeCode(?string $rawToken): string
     {
-        return SaleToken::normalizeCode($this->qrCodes->extractCode($rawCode));
+        return SaleToken::normalizeCode($this->qrCodes->extractCode($rawToken));
     }
 
     /**

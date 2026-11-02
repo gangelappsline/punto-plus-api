@@ -11,7 +11,7 @@ Panel del negocio                        App del cliente
 GET /api/business/new-token
         │  { code, qr.svg, expires_at }
         ▼
-   muestra el QR  ──── lo escanea ────▶  POST /api/customer/validate-token { code }
+   muestra el QR  ──── lo escanea ────▶  POST /api/customer/validate-token { token }
                                               │  suma la venta a su tarjeta
                                               ▼
                                         201 + customer_card.progress
@@ -102,13 +102,24 @@ otros comercios, pero **no en el suyo**).
 curl -s -X POST "$API/api/customer/validate-token" \
   -H "Authorization: Bearer $TOKEN_CLIENTE" \
   -H "Content-Type: application/json" \
-  -d '{"code": "k7qm-2xpd"}'
+  -d '{"token": "k7qm-2xpd"}'
 ```
 
 | Campo | Obligatorio | Notas |
 |---|---|---|
-| `code` | sí | Código tecleado (`K7QM-2XPD`, `k7qm2xpd`) o contenido del QR (JSON con `code`, deep link o URL con `?code=`). |
+| `token` | sí | Código tecleado (`K7QM-2XPD`, `k7qm2xpd`) o contenido del QR (JSON con `code`, deep link o URL con `?code=`). |
+| `code` | no | **Alias de `token`**: se acepta para los clientes que ya enviaban ese nombre. |
 | `purchase_amount` | no | Monto de la compra; si el token ya lo trae, este manda. Obligatorio para tarjetas por consumo sin monto en el token. |
+
+Si no llega ninguno de los dos, la respuesta es `422` con el error en `token`:
+
+```json
+{
+  "message": "Escanea el QR del negocio o escribe el código del token.",
+  "error": "validation_error",
+  "errors": { "token": ["Escanea el QR del negocio o escribe el código del token."] }
+}
+```
 
 Respuesta (`201`), con la misma forma que `POST /api/business/stamps/scan`:
 
@@ -144,13 +155,13 @@ Respuesta (`201`), con la misma forma que `POST /api/business/stamps/scan`:
 
 | Situación | Respuesta |
 |---|---|
-| Token inexistente o ya usado | `422` · `code` → «El código no es válido o ya se utilizó…» |
-| Token caducado | `422` · `code` → «El código caducó: los tokens de venta duran 5 minutos…» (y se elimina) |
-| Negocio o programa inactivo | `422` · `code` |
-| Dueño validando su propio token | `422` · `code` → «No puedes validar un token de tu propio negocio.» |
-| Programa privado y el cliente no tenía tarjeta | `422` · `code` → «Este programa requiere una invitación del negocio.» |
+| Token inexistente o ya usado | `422` · `token` → «El código no es válido o ya se utilizó…» |
+| Token caducado | `422` · `token` → «El código caducó: los tokens de venta duran 5 minutos…» (y se elimina) |
+| Negocio o programa inactivo | `422` · `token` |
+| Dueño validando su propio token | `422` · `token` → «No puedes validar un token de tu propio negocio.» |
+| Programa privado y el cliente no tenía tarjeta | `422` · `token` → «Este programa requiere una invitación del negocio.» |
 | Tarjeta por consumo sin monto | `422` · `purchase_amount` |
-| Demasiados sellos seguidos / tope diario | `422` · `code` (reglas `CARD_STAMP_THROTTLE_SECONDS` / `CARD_MAX_STAMPS_PER_DAY`) |
+| Demasiados sellos seguidos / tope diario | `422` · `token` (reglas `CARD_STAMP_THROTTLE_SECONDS` / `CARD_MAX_STAMPS_PER_DAY`) |
 | Más de 20 intentos por minuto | `429` (`throttle:sale-token-validate`) |
 
 Detalles:

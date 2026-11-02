@@ -25,7 +25,7 @@ class CustomerSaleTokenController extends Controller
     /**
      * POST /api/customer/validate-token
      *
-     * Body: { code, purchase_amount? }
+     * Body: { token, purchase_amount? } — `code` sigue aceptándose como alias.
      */
     public function validateToken(ValidateSaleTokenRequest $request): JsonResponse
     {
@@ -34,7 +34,7 @@ class CustomerSaleTokenController extends Controller
 
         $outcome = $this->tokens->redeem(
             user: $user,
-            rawCode: $request->validated('code'),
+            rawToken: $request->saleToken(),
             data: $request->validated(),
         );
 

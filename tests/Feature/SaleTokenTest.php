@@ -117,7 +117,7 @@ class SaleTokenTest extends TestCase
 
         // Se acepta el código con guion y en minúsculas (como lo teclea el cliente).
         $response = $this->actingAsApi($this->cliente)->postJson('/api/customer/validate-token', [
-            'code' => strtolower(substr($code, 0, 4).'-'.substr($code, 4)),
+            'token' => strtolower(substr($code, 0, 4).'-'.substr($code, 4)),
         ]);
 
         $response->assertCreated()
@@ -139,7 +139,7 @@ class SaleTokenTest extends TestCase
         $token = SaleToken::factory()->forLoyaltyCard($this->card)->create();
 
         $this->actingAsApi($this->cliente)
-            ->postJson('/api/customer/validate-token', ['code' => $token->code])
+            ->postJson('/api/customer/validate-token', ['token' => $token->code])
             ->assertCreated()
             ->assertJsonPath('customer_card.stamps_count', 1);
 
@@ -150,14 +150,30 @@ class SaleTokenTest extends TestCase
         ]);
     }
 
+    public function test_tambien_se_acepta_el_alias_code_y_falta_el_token_responde_422(): void
+    {
+        $token = SaleToken::factory()->forLoyaltyCard($this->card)->create();
+
+        $this->actingAsApi($this->cliente)
+            ->postJson('/api/customer/validate-token', ['code' => $token->code])
+            ->assertCreated()
+            ->assertJsonPath('data.source', 'token');
+
+        // Sin `token` ni `code` el error llega en la clave `token`.
+        $this->actingAsApi($this->cliente)
+            ->postJson('/api/customer/validate-token', [])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('token');
+    }
+
     public function test_un_token_caducado_responde_422_y_se_elimina(): void
     {
         $token = SaleToken::factory()->forLoyaltyCard($this->card)->expired()->create();
 
         $this->actingAsApi($this->cliente)
-            ->postJson('/api/customer/validate-token', ['code' => $token->code])
+            ->postJson('/api/customer/validate-token', ['token' => $token->code])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors('code');
+            ->assertJsonValidationErrors('token');
 
         $this->assertDatabaseMissing('sale_tokens', ['id' => $token->getKey()]);
         $this->assertDatabaseCount('stamps', 0);
@@ -168,13 +184,13 @@ class SaleTokenTest extends TestCase
         $token = SaleToken::factory()->forLoyaltyCard($this->card)->create();
 
         $this->actingAsApi($this->cliente)
-            ->postJson('/api/customer/validate-token', ['code' => $token->code])
+            ->postJson('/api/customer/validate-token', ['token' => $token->code])
             ->assertCreated();
 
         $this->actingAsApi($this->cliente)
-            ->postJson('/api/customer/validate-token', ['code' => $token->code])
+            ->postJson('/api/customer/validate-token', ['token' => $token->code])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors('code');
+            ->assertJsonValidationErrors('token');
 
         $this->assertDatabaseCount('stamps', 1);
     }
@@ -184,9 +200,9 @@ class SaleTokenTest extends TestCase
         $token = SaleToken::factory()->forLoyaltyCard($this->card)->create();
 
         $this->actingAsApi($this->owner)
-            ->postJson('/api/customer/validate-token', ['code' => $token->code])
+            ->postJson('/api/customer/validate-token', ['token' => $token->code])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors('code');
+            ->assertJsonValidationErrors('token');
 
         // El token sigue vivo para que lo use un cliente real.
         $this->assertDatabaseHas('sale_tokens', ['id' => $token->getKey()]);
@@ -200,7 +216,7 @@ class SaleTokenTest extends TestCase
         $token = SaleToken::factory()->forLoyaltyCard($spendCard)->create(['purchase_amount' => 250]);
 
         $this->actingAsApi($this->cliente)
-            ->postJson('/api/customer/validate-token', ['code' => $token->code])
+            ->postJson('/api/customer/validate-token', ['token' => $token->code])
             ->assertCreated()
             ->assertJsonPath('data.points_awarded', 20)
             ->assertJsonPath('customer_card.points_count', 20);
@@ -213,9 +229,9 @@ class SaleTokenTest extends TestCase
         $token = SaleToken::factory()->forLoyaltyCard($this->card)->create();
 
         $this->actingAsApi($this->cliente)
-            ->postJson('/api/customer/validate-token', ['code' => $token->code])
+            ->postJson('/api/customer/validate-token', ['token' => $token->code])
             ->assertUnprocessable()
-            ->assertJsonValidationErrors('code');
+            ->assertJsonValidationErrors('token');
 
         $this->assertDatabaseCount('customer_cards', 0);
         $this->assertDatabaseCount('stamps', 0);
