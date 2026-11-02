@@ -9,6 +9,9 @@ enum StampSource: string
     case Import = 'import';
     case Adjustment = 'adjustment';
 
+    /** El cliente validó un token de venta generado por el negocio. */
+    case Token = 'token';
+
     public function label(): string
     {
         return match ($this) {
@@ -16,6 +19,7 @@ enum StampSource: string
             self::Manual => 'Registro manual',
             self::Import => 'Importación',
             self::Adjustment => 'Ajuste del negocio',
+            self::Token => 'Token de venta',
         };
     }
 }

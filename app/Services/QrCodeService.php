@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\CustomerCard;
 use App\Models\LoyaltyCard;
+use App\Models\SaleToken;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
 use BaconQrCode\Renderer\ImageRenderer;
 use BaconQrCode\Renderer\RendererStyle\RendererStyle;
@@ -27,6 +28,8 @@ final class QrCodeService
     public const TYPE_JOIN = 'loyalty_card.join';
 
     public const TYPE_CUSTOMER_CARD = 'customer_card.identify';
+
+    public const TYPE_SALE_TOKEN = 'sale_token.redeem';
 
     private const VERSION = 1;
 
@@ -66,6 +69,24 @@ final class QrCodeService
             'required_stamps' => (int) $card->required_stamps,
             'points' => (int) $card->points_count,
             'total_points_earned' => (int) $card->total_points_earned,
+        ]);
+    }
+
+    /**
+     * Token de venta que el negocio muestra y el cliente escanea.
+     *
+     * @return array<string, mixed>
+     */
+    public function forSaleToken(SaleToken $token): array
+    {
+        return $this->render([
+            'v' => self::VERSION,
+            'type' => self::TYPE_SALE_TOKEN,
+            'code' => $token->code,
+            'loyalty_card_id' => $token->loyalty_card_id,
+            'business_id' => $token->business_id,
+            'business' => $token->relationLoaded('business') ? $token->business?->name : null,
+            'expires_at' => $token->expires_at?->toIso8601String(),
         ]);
     }
 

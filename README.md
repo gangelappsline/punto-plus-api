@@ -173,6 +173,7 @@ nunca puede leer tarjetas de otro cliente ni datos de un negocio.
 | `customer_cards` | **uuid** | Tarjeta de un cliente: visitas (`stamps_count`), puntos (`points_count`, `total_points_earned`), `status`, `code` y ciclo (`cycle_started_at`, `cycle_expires_at`) | `user_id`/`loyalty_card_id`/`business_id` → **cascade** |
 | `stamps` | **uuid** | Compra escaneada (`source`, `purchase_amount`, `points_awarded`, `stamped_at`) | `customer_card_id` → **cascade** |
 | `redemptions` | **uuid** | Canjes (`code`, `status`, `stamps_used` o `points_used`) | `customer_card_id` → **cascade** |
+| `sale_tokens` | **uuid** | Token de venta del negocio: `code` (único, 8 caracteres), `expires_at` (5 min), `purchase_amount` opcional; se elimina al validarse | `business_id`/`loyalty_card_id` → **cascade** |
 | `whatsapp_messages` | **uuid** | Envíos de WhatsApp, mensajes entrantes y acuses de entrega/lectura (`direction`, `status`, `wa_message_id`) | `business_id` → null on delete |
 | `oauth_*` | | Tablas de Passport (clientes, tokens, códigos) | — |
 
@@ -226,6 +227,7 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `GET` | `/api/customer/cards/{card}/stamps` | Historial de sellos |
 | `GET` | `/api/customer/cards/{card}/rewards` | Recompensas y cuáles puedo canjear |
 | `GET` | `/api/customer/cards/{card}/qr` | QR que el negocio escanea para sellar |
+| `POST` | `/api/customer/validate-token` | **Validar el token de venta del negocio** (`code` escaneado o escrito): suma la compra a mi tarjeta y el token se elimina |
 | `POST` | `/api/customer/cards/{card}/redeem` | Solicitar un canje (`reward_id`) |
 | `GET` | `/api/customer/redemptions` | Mis canjes (`?status=pending`) |
 | `GET` | `/api/customer/redemptions/{redemption}` | Detalle del canje (incluye el código) |
@@ -274,6 +276,9 @@ En `PUT /api/business/card`, el paso `information` acepta `logo_url` y `backgrou
 | `GET` | `/api/business/promotions/{promotion}` | Detalle |
 | `PUT` | `/api/business/promotions/{promotion}` | Editar |
 | `DELETE` | `/api/business/promotions/{promotion}` | Eliminar |
+| `GET` | `/api/business/new-token` | **Generar token de venta** para mostrar como QR (`?loyalty_card_id=`, `?purchase_amount=`, `?notes=`); dura `SALE_TOKEN_TTL_MINUTES` (5 min) |
+| `GET` | `/api/business/tokens` | Tokens de venta vivos del negocio |
+| `DELETE` | `/api/business/tokens/{token}` | Cancelar un token antes de que caduque |
 | `POST` | `/api/business/stamps/scan` | **Registrar compra** escaneando el QR del cliente (sello o puntos; `purchase_amount` obligatorio en tarjetas por consumo) |
 | `GET` | `/api/business/stamps/recent` | Últimos escaneos |
 | `GET` | `/api/business/stamps` | Historial de sellos con filtros |
@@ -462,6 +467,28 @@ Ejemplo de actualización parcial:
   (`promotions/{id}/banner/…`) y persiste la ruta en `promotions.image_path`; la respuesta la
   expone como `image_path` + `image_url`. `remove_banner: true` la elimina.
 
+### 8.3 Tokens de venta (`sale_tokens`)
+
+Segunda forma de registrar una compra, pensada para el mostrador **sin escanear la tarjeta del
+cliente** (guía completa en [`docs/tokens-venta.md`](docs/tokens-venta.md)):
+
+1. `GET /api/business/new-token` genera un código corto (8 caracteres) y lo devuelve con su QR
+   (`qr.svg`, `qr_content`).
+2. El panel lo muestra; el cliente lo escanea o escribe `display_code` (`ABCD-EFGH`).
+3. `POST /api/customer/validate-token` registra la venta en la tarjeta del cliente
+   (`stamps.source = token`) y **elimina** el token.
+
+Reglas:
+
+- Vigencia `SALE_TOKEN_TTL_MINUTES` (**5 minutos** por defecto); al caducar responde `422`.
+- Un solo uso: el token se elimina al validarse (y la validación es atómica con bloqueo de fila).
+- Si el cliente no tenía tarjeta en ese programa, se une automáticamente (sólo programas públicos).
+- En tarjetas por consumo el monto (`purchase_amount`) es obligatorio: se puede fijar al generar el
+  token o enviarlo al validar.
+- El dueño del negocio no puede validar sus propios tokens (`SALE_TOKEN_ALLOW_SELF_REDEMPTION=false`).
+- `SALE_TOKEN_MAX_ACTIVE` limita los tokens vivos por negocio (10 por defecto; los más antiguos se
+  descartan al generar uno nuevo).
+
 ## 9. Errores
 
 | HTTP | `error` | Cuándo |
@@ -581,6 +608,7 @@ app/
 └── Support/                                   # Media, PhoneNumber, PromotionSchedule, OAuth/TokenResponse
 docs/whatsapp.md                               # guía de configuración en Meta
 docs/tarjetas-y-promociones.md                 # qué enviar para cada tipo de tarjeta y promoción
+docs/tokens-venta.md                           # tokens de venta: QR del negocio que valida el cliente
 public/docs/openapi.yaml                       # contrato OpenAPI 3.0 (Swagger)
 ```
 

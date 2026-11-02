@@ -15,6 +15,7 @@ use App\Models\LoyaltyCard;
 use App\Models\Promotion;
 use App\Models\Redemption;
 use App\Models\Reward;
+use App\Models\SaleToken;
 use App\Models\Stamp;
 use App\Models\User;
 use App\Policies\BusinessPolicy;
@@ -23,6 +24,7 @@ use App\Policies\LoyaltyCardPolicy;
 use App\Policies\PromotionPolicy;
 use App\Policies\RedemptionPolicy;
 use App\Policies\RewardPolicy;
+use App\Policies\SaleTokenPolicy;
 use App\Policies\StampPolicy;
 use Carbon\CarbonInterval;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -88,6 +90,7 @@ class AppServiceProvider extends ServiceProvider
         Gate::policy(Reward::class, RewardPolicy::class);
         Gate::policy(Redemption::class, RedemptionPolicy::class);
         Gate::policy(Stamp::class, StampPolicy::class);
+        Gate::policy(SaleToken::class, SaleTokenPolicy::class);
 
         // El rol admin tiene acceso global (soporte y moderación de la plataforma).
         Gate::before(fn (User $user): ?bool => $user->isAdmin() ? true : null);
@@ -103,6 +106,14 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('api', fn (Request $request): Limit => $request->user() !== null
             ? Limit::perMinute(120)->by('user:'.$request->user()->getAuthIdentifier())
             : Limit::perMinute(60)->by('ip:'.$request->ip()));
+
+        // Tokens de venta: el panel no necesita más de 30 códigos por minuto.
+        RateLimiter::for('sale-tokens', fn (Request $request): Limit => Limit::perMinute(30)
+            ->by('sale-tokens:'.($request->user()?->getAuthIdentifier() ?? $request->ip())));
+
+        // Validación de tokens: limita el intento de adivinar códigos.
+        RateLimiter::for('sale-token-validate', fn (Request $request): Limit => Limit::perMinute(20)
+            ->by('sale-token-validate:'.($request->user()?->getAuthIdentifier() ?? $request->ip())));
     }
 
     private function registerEventListeners(): void

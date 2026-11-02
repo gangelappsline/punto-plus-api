@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\BusinessController;
 use App\Http\Controllers\Api\BusinessQrController;
 use App\Http\Controllers\Api\CustomerCardController;
+use App\Http\Controllers\Api\CustomerSaleTokenController;
 use App\Http\Controllers\Api\LoyaltyCardController;
 use App\Http\Controllers\Api\Business\WhatsAppController as BusinessWhatsAppController;
 use App\Http\Controllers\Api\BusinessCategoryController;
@@ -16,6 +17,7 @@ use App\Http\Controllers\Api\ProductPresentationController;
 use App\Http\Controllers\Api\PromotionController;
 use App\Http\Controllers\Api\RedemptionController;
 use App\Http\Controllers\Api\RewardController;
+use App\Http\Controllers\Api\SaleTokenController;
 use App\Http\Controllers\Api\StampController;
 use App\Http\Controllers\Api\UserController;
 use App\Http\Controllers\Api\Webhooks\WhatsAppWebhookController;
@@ -113,6 +115,11 @@ Route::middleware('auth:api')->group(function (): void {
 
         // Negocios a menos de 10 km de la ubicación enviada (`latitude`/`longitude`).
         Route::get('near-me', [ClientNearMeController::class, 'index'])->name('near-me.index');
+
+        // Token de venta: el cliente escanea el QR del negocio o escribe el código.
+        Route::post('validate-token', [CustomerSaleTokenController::class, 'validateToken'])
+            ->name('tokens.validate')
+            ->middleware('throttle:sale-token-validate');
     });
 
     /*
@@ -126,6 +133,11 @@ Route::middleware('auth:api')->group(function (): void {
 
         // Negocios a menos de 10 km de la ubicación enviada (`latitude`/`longitude`).
         Route::get('near-me', [ClientNearMeController::class, 'index'])->name('near-me.index');
+
+        // Token de venta: el cliente escanea el QR del negocio o escribe el código.
+        Route::post('validate-token', [CustomerSaleTokenController::class, 'validateToken'])
+            ->name('tokens.validate')
+            ->middleware('throttle:sale-token-validate');
     });
 
     /*
@@ -191,6 +203,14 @@ Route::middleware('auth:api')->group(function (): void {
         Route::get('promotions/{promotion}', [PromotionController::class, 'show'])->name('promotions.show');
         Route::put('promotions/{promotion}', [PromotionController::class, 'update'])->name('promotions.update');
         Route::delete('promotions/{promotion}', [PromotionController::class, 'destroy'])->name('promotions.destroy');
+
+        // Tokens de venta: el panel genera el código/QR y el cliente lo valida.
+        // (`GET` porque el panel sólo necesita el código; devuelve 201 con el recurso.)
+        Route::get('new-token', [SaleTokenController::class, 'store'])
+            ->name('tokens.new')
+            ->middleware('throttle:sale-tokens');
+        Route::get('tokens', [SaleTokenController::class, 'index'])->name('tokens.index');
+        Route::delete('tokens/{saleToken}', [SaleTokenController::class, 'destroy'])->name('tokens.destroy');
 
         // Sellos: el negocio escanea el QR del cliente
         Route::post('stamps/scan', [StampController::class, 'scan'])->name('stamps.scan');
