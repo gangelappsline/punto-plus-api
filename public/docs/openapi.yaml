@@ -61,7 +61,7 @@ info:
 
     1. `GET /api/business/new-token` → `code` de 8 caracteres + `qr` (payload/json/svg).
     2. El cliente escanea el QR o escribe `display_code` (`ABCD-EFGH`).
-    3. `POST /api/customer/validate-token` con `code` → registra el sello/puntos
+    3. `POST /api/customer/validate-token` con `token` → registra el sello/puntos
        (`source: token`) y **elimina** el token.
 
     El token dura `SALE_TOKEN_TTL_MINUTES` (**5 minutos** por defecto), es de un solo uso y se
@@ -515,8 +515,9 @@ paths:
       tags: [Cliente]
       summary: Validar el token de venta del negocio
       description: |
-        El cliente escanea el QR que muestra el negocio (`code`, JSON del QR, deep link o URL con
-        `?code=`) o escribe el código (`K7QM-2XPD`, `k7qm2xpd`).
+        El cliente escanea el QR que muestra el negocio o escribe el código (`K7QM-2XPD`,
+        `k7qm2xpd`) y lo envía en **`token`** (admite también el JSON del QR, un deep link o una
+        URL con `?code=`). `code` sigue aceptándose como alias de compatibilidad.
 
         - Registra la compra en la tarjeta del cliente con `source: token`.
         - El token se elimina (un solo uso) dentro de la misma transacción que el sello: si la
@@ -531,9 +532,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [code]
+              required: [token]
               properties:
-                code: { type: string, description: 'Código del token (texto, JSON del QR o URL con ?code=)', example: K7QM-2XPD }
+                token: { type: string, description: 'Código del token (texto, JSON del QR o URL con ?code=)', example: K7QM-2XPD }
+                code: { type: string, deprecated: true, description: 'Alias de `token` (compatibilidad con clientes antiguos)', example: K7QM-2XPD }
                 purchase_amount: { type: number, nullable: true, description: 'Monto de la compra; obligatorio en tarjetas por consumo si el token no lo trae', example: 250 }
       responses:
         '201':
@@ -556,9 +558,10 @@ paths:
           application/json:
             schema:
               type: object
-              required: [code]
+              required: [token]
               properties:
-                code: { type: string, example: K7QM-2XPD }
+                token: { type: string, example: K7QM-2XPD }
+                code: { type: string, deprecated: true, description: 'Alias de `token`' }
                 purchase_amount: { type: number, nullable: true }
       responses:
         '201':
@@ -1667,7 +1670,7 @@ paths:
       description: |
         Devuelve `201` con el token recién creado. El panel dibuja `qr.svg` (o codifica
         `qr_content` por su cuenta) y el cliente lo valida con
-        `POST /api/customer/validate-token`.
+        `POST /api/customer/validate-token` enviándolo en el campo `token`.
 
         - Dura `SALE_TOKEN_TTL_MINUTES` minutos (**5** por defecto) y es de un solo uso.
         - `loyalty_card_id` es obligatorio cuando el negocio tiene más de una tarjeta activa.

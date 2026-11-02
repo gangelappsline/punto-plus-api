@@ -227,7 +227,7 @@ los errores devuelven `message` y un campo `error` con código estable.
 | `GET` | `/api/customer/cards/{card}/stamps` | Historial de sellos |
 | `GET` | `/api/customer/cards/{card}/rewards` | Recompensas y cuáles puedo canjear |
 | `GET` | `/api/customer/cards/{card}/qr` | QR que el negocio escanea para sellar |
-| `POST` | `/api/customer/validate-token` | **Validar el token de venta del negocio** (`code` escaneado o escrito): suma la compra a mi tarjeta y el token se elimina |
+| `POST` | `/api/customer/validate-token` | **Validar el token de venta del negocio** (`token` escaneado o escrito; `code` sigue aceptándose como alias): suma la compra a mi tarjeta y el token se elimina |
 | `POST` | `/api/customer/cards/{card}/redeem` | Solicitar un canje (`reward_id`) |
 | `GET` | `/api/customer/redemptions` | Mis canjes (`?status=pending`) |
 | `GET` | `/api/customer/redemptions/{redemption}` | Detalle del canje (incluye el código) |
